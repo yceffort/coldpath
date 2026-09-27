@@ -107,6 +107,20 @@ impl Observation {
             }
         }
     }
+
+    /// `None` when the format has no function ranges to tell module evaluation from calls.
+    pub fn function_used(
+        &self,
+        text: &TextIndex,
+        module_scope: impl Fn(usize) -> bool,
+    ) -> Result<Option<Vec<Interval>>> {
+        match &self.ranges {
+            Ranges::V8(functions) => {
+                coverage::function_used_ranges(functions, text, module_scope).map(Some)
+            }
+            Ranges::Used(_) => Ok(None),
+        }
+    }
 }
 
 pub type Index = BTreeMap<String, Vec<Observation>>;

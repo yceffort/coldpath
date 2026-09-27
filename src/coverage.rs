@@ -60,6 +60,32 @@ pub fn validate_path(path: &str) -> Result<()> {
 /// A child range overrides its parent. Unioning all zero-count ranges is wrong:
 /// an unexecuted outer function can contain a hoisted function called elsewhere.
 pub fn used_ranges(functions: &[FunctionCoverage], text: &TextIndex) -> Result<Vec<Interval>> {
+    nested_used_ranges(functions, text)
+}
+
+/// Bytes executed inside functions, excluding module evaluation: the script's top level
+/// (whose root range spans the whole script) and functions for which `module_scope` returns
+/// true given the root start. Top-level blocks are excluded with their function.
+pub fn function_used_ranges(
+    functions: &[FunctionCoverage],
+    text: &TextIndex,
+    module_scope: impl Fn(usize) -> bool,
+) -> Result<Vec<Interval>> {
+    nested_used_ranges(
+        functions.iter().filter(|function| {
+            !function.ranges.first().is_some_and(|root| {
+                (root.start_offset == 0 && root.end_offset == text.utf16_len())
+                    || module_scope(root.start_offset)
+            })
+        }),
+        text,
+    )
+}
+
+fn nested_used_ranges<'a>(
+    functions: impl IntoIterator<Item = &'a FunctionCoverage>,
+    text: &TextIndex,
+) -> Result<Vec<Interval>> {
     let mut ranges = Vec::new();
     for function in functions {
         ensure!(

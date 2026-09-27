@@ -269,6 +269,19 @@ pub struct Report {
     /// sources checked on disk. Evidence export copies exactly these.
     #[serde(skip)]
     pub read_files: Vec<PathBuf>,
+    /// Per source: what the initial scenario executed, for recommendations.
+    #[serde(skip)]
+    pub initial_execution: BTreeMap<String, InitialExecution>,
+}
+
+/// Initial-scenario bytes split into function execution and module evaluation.
+#[derive(Debug, Default)]
+pub struct InitialExecution {
+    /// Bytes executed inside functions, or all observed bytes when the coverage format
+    /// cannot separate them.
+    pub function_bytes: usize,
+    /// Generated code executed only at the script's top level.
+    pub top_level: Vec<u8>,
 }
 
 /// Summary output keeps at most this many diagnostics per bundle; `--details` keeps all.
@@ -435,6 +448,7 @@ pub fn analyze_with_options(
         recommendations: Vec::new(),
         label_generator: None,
         read_files: Vec::new(),
+        initial_execution: BTreeMap::new(),
     };
     for path in options.maps.keys() {
         coverage::validate_path(path)?;
@@ -506,6 +520,7 @@ pub fn analyze_with_options(
         let observations = coverage.remove(&path);
         let mut used = Vec::new();
         let mut scenario_used: BTreeMap<String, Vec<Interval>> = BTreeMap::new();
+        let mut initial_function_used = Some(Vec::new());
         let mut verification = Vec::new();
         if let Some(observations) = &observations {
             for observation in observations {
@@ -531,6 +546,25 @@ pub fn analyze_with_options(
                 let ranges = observation
                     .used(&text)
                     .with_context(|| format!("normalize coverage for {path}"))?;
+                if options.initial_scenario.as_ref() == Some(&observation.scenario) {
+                    initial_function_used = match (
+                        initial_function_used,
+                        observation.function_used(&text, |start| {
+                            // Bundler wrappers (webpack's runtime IIFE, module factories) map to no source.
+                            text.byte(start).is_ok_and(|byte| {
+                                segments[segments.partition_point(|s| s.end <= byte)..]
+                                    .first()
+                                    .is_some_and(|s| s.source == 0)
+                            })
+                        })?,
+                    ) {
+                        (Some(mut all), Some(ranges)) => {
+                            all.extend(ranges);
+                            Some(all)
+                        }
+                        _ => None,
+                    };
+                }
                 used.extend_from_slice(&ranges);
                 scenario_used
                     .entry(observation.scenario.clone())
@@ -559,6 +593,48 @@ pub fn analyze_with_options(
                     })
                 })
                 .collect::<Result<_>>()?;
+        }
+        if let Some(initial_used) = options
+            .initial_scenario
+            .as_ref()
+            .and_then(|name| scenario_used.get(name))
+        {
+            let function_used = match initial_function_used {
+                Some(ranges) => coverage::union(ranges)
+                    .into_iter()
+                    .map(|range| {
+                        Ok(Interval {
+                            start: text.byte(range.start)?,
+                            end: text.byte(range.end)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                None => initial_used.clone(),
+            };
+            let top_level = scenario::difference(initial_used, &function_used);
+            let (mut function_cursor, mut top_level_cursor) = (0, 0);
+            for segment in &segments {
+                let function_bytes =
+                    scenario::overlap(segment, &function_used, &mut function_cursor);
+                scenario::overlap(segment, &top_level, &mut top_level_cursor);
+                let ranges = top_level[top_level_cursor..]
+                    .iter()
+                    .take_while(|range| range.start < segment.end);
+                if function_bytes == 0 && ranges.clone().next().is_none() {
+                    continue;
+                }
+                let entry = report
+                    .initial_execution
+                    .entry(sources[segment.source].name.clone())
+                    .or_default();
+                entry.function_bytes += function_bytes;
+                for range in ranges {
+                    entry.top_level.extend_from_slice(
+                        &content.as_bytes()
+                            [range.start.max(segment.start)..range.end.min(segment.end)],
+                    );
+                }
+            }
         }
         for scenario in &mut scenario_reports {
             scenario.bundle(

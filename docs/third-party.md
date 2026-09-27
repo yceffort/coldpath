@@ -67,14 +67,14 @@ Each entry also records the Chrome DevTools Protocol `initiator` type and `start
 
 ### Checked builds
 
-`scripts/verify-recovery.mjs` (part of `pnpm test:corpus`) builds the corpus with source maps, recovers modules while ignoring the maps, and uses the maps as ground truth: each recovered module should contain mapping segments from exactly one original source, no source may own two recovered modules in one chunk, and no original code may sit outside the recovered modules. Measured on 2026-09-25:
+`scripts/verify-recovery.mjs` (part of `pnpm test:corpus`) builds the corpus with source maps, recovers modules while ignoring the maps, and uses the maps as ground truth: each recovered module should contain mapping segments from exactly one original source, no source may own two recovered modules in one chunk, and no original code may sit outside the recovered modules. Measured on 2026-09-27:
 
 | Build | Version | Chunks | Modules | Async loaders | One source | Several sources | No mapped source | Mappings outside modules |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| webpack, object form | 5.111.1 | 3 | 13 | 0 | 13 | 0 | 0 | 0 |
-| webpack, array form (`moduleIds: 'natural'`) | 5.111.1 | 3 | 13 | 0 | 13 | 0 | 0 | 0 |
-| webpack, custom `chunkLoadingGlobal` | 5.111.1 | 3 | 13 | 0 | 13 | 0 | 0 | 0 |
-| webpack, module federation remote | 5.111.1 | 4 | 14 | 0 | 14 | 0 | 0 | 0 |
+| webpack, object form | 5.111.1 | 3 | 15 | 0 | 15 | 0 | 0 | 0 |
+| webpack, array form (`moduleIds: 'natural'`) | 5.111.1 | 3 | 15 | 0 | 15 | 0 | 0 | 0 |
+| webpack, custom `chunkLoadingGlobal` | 5.111.1 | 3 | 15 | 0 | 15 | 0 | 0 | 0 |
+| webpack, module federation remote | 5.111.1 | 4 | 16 | 0 | 16 | 0 | 0 | 0 |
 | webpack, `concatenateModules` | 5.111.1 | 3 | 10 | 0 | 9 | 1 | 0 | 0 |
 | Next.js Turbopack | 16.3.6 | 7 | 158 | 7 | 143 | 5 | 3 | 0 |
 | Next.js Turbopack | 15.5.25 | 7 | 156 | 7 | 141 | 5 | 3 | 0 |
