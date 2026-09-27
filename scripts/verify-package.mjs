@@ -121,6 +121,14 @@ assert.equal(report.initialScenario, 'initial')
 assert(report.importPaths.length > 0, 'graph import paths missing')
 assert.equal(report.bundles[0].verification[0].source, 'sha256')
 assert(report.totals.unobservedBytes > 0 && report.totals.unmeasuredBytes === 0)
+const analyzeScenarios = ['analyze', '--scenarios', 'coldpath.scenarios.json', '--json', 'artifacts/ordered.json']
+exec(coldpath, [...analyzeScenarios, '--scenario-order', 'initial,interaction'])
+assert.deepEqual(JSON.parse(await readFile(join(project, 'artifacts/ordered.json'), 'utf8')).scenarios, ['initial', 'interaction'])
+assert.throws(
+  () =>
+    execFileSync(coldpath, [...analyzeScenarios, '--scenario-order', 'initial,missing'], {cwd: project, encoding: 'utf8', stdio: 'pipe'}),
+  (error) => error.stderr.includes('received ["initial", "missing"], recorded ["initial", "interaction"]'),
+)
 console.log(
-  'Verified a fresh install: @yceffort/coldpath/rollup, coldpath graph, coldpath collect --scenarios, and coldpath analyze --scenarios.',
+  'Verified a fresh install: @yceffort/coldpath/rollup, coldpath graph, coldpath collect --scenarios, and coldpath analyze --scenarios with and without --scenario-order.',
 )
