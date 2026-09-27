@@ -158,11 +158,11 @@ Below the summary, files that no recording loaded are hidden (the summary offers
 
 ![Treemap of the demo bundle grouped by package, colored by first observed scenario](docs/images/treemap.png)
 
-**5. Follow a review action.** "Review actions" (between the summary and the explorer) lists sources whose bytes first run after the initial load. Selecting `ReportChart.jsx` shows that 48 B of it run on the initial load (its module body) and 532 B run only in "open-report", the static import chain `main.jsx → Dashboard.jsx:4:1 → ReportChart.jsx` that pulls it into the initial bundle, isolated gzip estimates, and a code inspector per scenario:
+**5. Follow a review action.** "Review actions" (between the summary and the explorer) lists sources whose bytes first run after the initial load. Selecting `ReportChart.jsx` shows that 48 B of it run on the initial load (its top-level declarations) and 532 B run only in "open-report", the static import chain `main.jsx → Dashboard.jsx:4:1 → ReportChart.jsx` that pulls it into the initial bundle, isolated gzip estimates, and a code inspector per scenario:
 
 ![Source detail for ReportChart.jsx with its import chain, review action, and code inspector](docs/images/source-detail.png)
 
-The action is "split later-only functionality" rather than "defer" because part of the module runs initially; moving the whole import behind `import()` could change initial behavior. `search.js` is already behind a dynamic import, so the report asks you to record it in the initial scenario before drawing conclusions instead of suggesting a change. Estimates are for review, not guaranteed savings: rebuild and record again to measure the result.
+The action is "review lazy loading" because those 48 B are only top-level declarations (`width` and `height`) with no calls or property writes; every function in the module runs only after "open-report". A module whose functions run initially, or whose top level calls, constructs, or writes properties, gets "split later-only functionality" instead, because moving the whole import behind `import()` could change initial behavior. `search.js` is already behind a dynamic import, so the report asks you to record it in the initial scenario before drawing conclusions instead of suggesting a change. Estimates are for review, not guaranteed savings: rebuild and record again to measure the result.
 
 **6. Check pull requests in CI.** The [GitHub Action](#github-action) runs the same analysis on the base branch and the pull request, enforces growth budgets, and keeps one comment up to date on the pull request:
 

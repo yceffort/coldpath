@@ -1,13 +1,13 @@
 # Real-build accuracy corpus
 
-Snapshot measured locally on macOS with Node 25.9.0 on 2026-09-23. Reproduce with `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, and `pnpm test:corpus`. CI repeats the corpus on Linux/macOS with Node 24. These checks measure agreement with an independent source-map oracle and known-origin literal probes, not exact semantic ownership of every minified byte.
+Snapshot measured locally on macOS with Node 24.20.0 on 2026-09-27. Reproduce with `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, and `pnpm test:corpus`. CI repeats the corpus on Linux/macOS with Node 24. These checks measure agreement with an independent source-map oracle and known-origin literal probes, not exact semantic ownership of every minified byte.
 
 | Build | Version | Generated B | Source-map oracle disagreement | Known-origin probe errors | Scenario/bundle checks |
 | --- | --- | ---: | ---: | ---: | ---: |
-| esbuild | 0.28.2 | 459 | 0.0000% | 0.0000% (0/67 B) | 4 |
-| rollup | 4.63.4 | 586 | 0.0000% | 0.0000% (0/67 B) | 4 |
-| vite | 8.3.0 | 2398 | 0.0000% | 0.0000% (0/67 B) | 4 |
-| webpack | 5.111.1 | 2608 | 0.0000% | 0.0000% (0/67 B) | 4 |
+| esbuild | 0.28.2 | 702 | 0.0000% | 0.0000% (0/67 B) | 4 |
+| rollup | 4.63.4 | 968 | 0.0000% | 0.0000% (0/67 B) | 4 |
+| vite | 8.3.0 | 2641 | 0.0000% | 0.0000% (0/67 B) | 4 |
+| webpack | 5.111.1 | 2783 | 0.0000% | 0.0000% (0/67 B) | 4 |
 | next-turbopack | 16.3.6 | 425670 | 0.0000% | 32.8358% (22/67 B) | 17 |
 
 Oracle lookup follows the documented last-mapping-wins rule at duplicate generated coordinates. [`fixtures/corpus/results.json`](../fixtures/corpus/results.json) also publishes `duplicateMappingBytes` and disagreement with the reference library’s default first-duplicate lookup (`defaultOracleDisagreementBytes`); these ambiguities are not hidden.

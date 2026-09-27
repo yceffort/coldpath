@@ -263,7 +263,7 @@ impl Accumulator {
     }
 }
 
-fn overlap(segment: &IndexedSegment, used: &[Interval], cursor: &mut usize) -> usize {
+pub(crate) fn overlap(segment: &IndexedSegment, used: &[Interval], cursor: &mut usize) -> usize {
     while *cursor < used.len() && used[*cursor].end <= segment.start {
         *cursor += 1;
     }
@@ -280,7 +280,7 @@ fn overlap(segment: &IndexedSegment, used: &[Interval], cursor: &mut usize) -> u
 }
 
 /// Set subtraction on sorted, disjoint byte ranges (not subtraction of totals).
-fn difference(used: &[Interval], initial: &[Interval]) -> Vec<Interval> {
+pub(crate) fn difference(used: &[Interval], initial: &[Interval]) -> Vec<Interval> {
     let mut result = Vec::new();
     let mut index = 0;
     for range in used {

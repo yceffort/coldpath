@@ -25,7 +25,7 @@ const work = join(root, 'artifacts/accuracy-corpus')
 const project = join(work, 'project')
 await rm(work, {recursive: true, force: true})
 await mkdir(join(project, 'src'), {recursive: true})
-for (const file of ['entry.js', 'startup.js', 'chart.js', 'search.js', 'page.jsx']) {
+for (const file of ['entry.js', 'startup.js', 'chart.js', 'register.js', 'mixed.js', 'search.js', 'page.jsx']) {
   await copyFile(join(root, 'fixtures/corpus', file), join(project, 'src', file))
 }
 await writeFile(join(project, 'package.json'), JSON.stringify({name: 'coldpath-accuracy-corpus', private: true, type: 'module'}))
@@ -375,9 +375,15 @@ try {
         artifact.name + ': static chart import location',
       )
       assert(
-        search?.edges.some((edge) => edge.to.endsWith('/search.js') && edge.kind === 'dynamic' && edge.location?.line === (next ? 12 : 7)),
+        search?.edges.some((edge) => edge.to.endsWith('/search.js') && edge.kind === 'dynamic' && edge.location?.line === (next ? 12 : 9)),
         artifact.name + ': dynamic search boundary/location',
       )
+      if (artifact.name === 'vite' || artifact.name === 'webpack') {
+        const action = (file) => report.recommendations.find((r) => r.scenario === 'open-report' && r.source.endsWith('/' + file))?.kind
+        assert.equal(action('chart.js'), 'defer-review', artifact.name + ': functions-only module')
+        assert.equal(action('register.js'), 'split-review', artifact.name + ': top-level registration')
+        assert.equal(action('mixed.js'), 'split-review', artifact.name + ': function called initially')
+      }
       // Negative control: preserving every count while corrupting source ownership must fail.
       const changed = structuredClone(report)
       for (const bundle of changed.bundles)

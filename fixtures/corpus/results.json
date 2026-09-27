@@ -1,10 +1,10 @@
 {
-  "node": "v25.9.0",
+  "node": "v24.20.0",
   "results": [
     {
       "bundler": "esbuild",
       "version": "0.28.2",
-      "generatedBytes": 459,
+      "generatedBytes": 702,
       "oracleDisagreementBytes": 0,
       "oracleDisagreementPercent": 0,
       "markerBytes": 67,
@@ -13,13 +13,13 @@
       "duplicateMappingBytes": 0,
       "defaultOracleDisagreementBytes": 0,
       "checkedScenarioBundles": 4,
-      "graphMatchedSources": 4,
+      "graphMatchedSources": 6,
       "negativeControlDetected": true
     },
     {
       "bundler": "rollup",
       "version": "4.63.4",
-      "generatedBytes": 586,
+      "generatedBytes": 968,
       "oracleDisagreementBytes": 0,
       "oracleDisagreementPercent": 0,
       "markerBytes": 67,
@@ -28,13 +28,13 @@
       "duplicateMappingBytes": 0,
       "defaultOracleDisagreementBytes": 0,
       "checkedScenarioBundles": 4,
-      "graphMatchedSources": 4,
+      "graphMatchedSources": 6,
       "negativeControlDetected": true
     },
     {
       "bundler": "vite",
       "version": "8.3.0",
-      "generatedBytes": 2398,
+      "generatedBytes": 2641,
       "oracleDisagreementBytes": 0,
       "oracleDisagreementPercent": 0,
       "markerBytes": 67,
@@ -43,13 +43,13 @@
       "duplicateMappingBytes": 0,
       "defaultOracleDisagreementBytes": 0,
       "checkedScenarioBundles": 4,
-      "graphMatchedSources": 4,
+      "graphMatchedSources": 6,
       "negativeControlDetected": true
     },
     {
       "bundler": "webpack",
       "version": "5.111.1",
-      "generatedBytes": 2608,
+      "generatedBytes": 2783,
       "oracleDisagreementBytes": 0,
       "oracleDisagreementPercent": 0,
       "markerBytes": 67,
@@ -58,7 +58,7 @@
       "duplicateMappingBytes": 0,
       "defaultOracleDisagreementBytes": 0,
       "checkedScenarioBundles": 4,
-      "graphMatchedSources": 5,
+      "graphMatchedSources": 7,
       "negativeControlDetected": true
     },
     {

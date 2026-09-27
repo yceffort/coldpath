@@ -18,7 +18,7 @@ const work = join(root, 'artifacts/recovery')
 const NEXT15 = '15.5.25'
 await rm(work, {recursive: true, force: true})
 await mkdir(join(work, 'src'), {recursive: true})
-for (const file of ['entry.js', 'startup.js', 'chart.js', 'search.js', 'page.jsx'])
+for (const file of ['entry.js', 'startup.js', 'chart.js', 'register.js', 'mixed.js', 'search.js', 'page.jsx'])
   await copyFile(join(root, 'fixtures/corpus', file), join(work, 'src', file))
 // React supplies real package modules next to the corpus sources.
 await writeFile(
