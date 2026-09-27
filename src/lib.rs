@@ -357,7 +357,8 @@ pub fn analyze_with_options(
             options.scenario_order.len() == scenarios.len()
                 && options.scenario_order.iter().collect::<BTreeSet<_>>()
                     == scenarios.iter().collect(),
-            "--scenario-order must list every scenario exactly once: {scenarios:?}"
+            "--scenario-order must list every scenario exactly once; received {:?}, recorded {scenarios:?}",
+            options.scenario_order
         );
         scenarios.clone_from(&options.scenario_order);
     }

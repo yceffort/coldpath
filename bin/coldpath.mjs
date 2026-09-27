@@ -170,8 +170,7 @@ async function main() {
   return runAnalyzer([
     ...(args.includes('--dir') ? [] : ['--dir', dir]),
     ...scenarios.flatMap((s) => ['--coverage', s.out]),
-    '--scenario-order',
-    names.join(','),
+    ...(args.includes('--scenario-order') ? [] : ['--scenario-order', names.join(',')]),
     ...(args.includes('--initial-scenario') ? [] : ['--initial-scenario', names[0]]),
     ...args,
   ])
