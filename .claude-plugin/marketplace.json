@@ -1,0 +1,13 @@
+{
+  "name": "coldpath",
+  "description": "coldpath agent skill",
+  "owner": {
+    "name": "yceffort"
+  },
+  "plugins": [
+    {
+      "name": "coldpath",
+      "source": "./"
+    }
+  ]
+}
