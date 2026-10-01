@@ -26,7 +26,7 @@ Early-stage software: the CLI and JSON schema may change. Unobserved bytes are c
 npm install --save-dev @yceffort/coldpath
 ```
 
-The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64; glibc 2.35 or newer) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Windows is not supported. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` graph plugins. Collection additionally needs `playwright` in your project.
+The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64; glibc 2.35 or newer) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Windows is not supported. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` graph plugins. Collection and CPU profiling additionally need `playwright` in your project.
 
 On other platforms, or to use the analyzer without Node.js, build it with Rust 1.88 or newer:
 
@@ -53,6 +53,17 @@ coldpath analyze --scenarios coldpath.scenarios.json --graph dist/assets/coldpat
 ```
 
 `coldpath analyze` (or `coldpath` with analyzer options) runs the Rust analyzer from `COLDPATH_ANALYZER`, the installed `@yceffort/coldpath-<platform>-<arch>` package, or the native `coldpath` binary on `PATH` (the npm wrapper skips itself), in that order. See [collecting coverage](docs/collecting.md#scenario-files) for the scenario file.
+
+### Claude Code skill
+
+The repository is also a Claude Code plugin with a `coldpath` skill, which guides an agent through graph setup, scenarios, reading observed and unobserved bytes, and measuring and comparing CPU self time in apps you build:
+
+```text
+/plugin marketplace add yceffort/coldpath
+/plugin install coldpath@coldpath
+```
+
+Marketplaces outside Anthropic's do not update automatically by default. After a release, run `claude plugin update coldpath@coldpath`, or turn on auto-update for the marketplace in `/plugin`.
 
 ## Try the recorded example
 
@@ -334,7 +345,7 @@ steps:
 
 `args` takes one argument per line and must not include output options. Use `baseline` instead of `base-directory` to pass a report you already have, for example one downloaded from the base branch's last run. The comment is found by a marker and must be written by a bot account (the default `GITHUB_TOKEN` is). Pull requests from forks get a read-only token, so the comment step only warns there; the artifact is still uploaded. The runner needs Rust (`cargo`). [`pr-report.yml`](.github/workflows/pr-report.yml) runs the action on this repository's recorded example.
 
-The comment includes CPU changes when `args` lists `--profile` files and both builds were profiled in the same job. `args` runs in both checkouts, so write each build's profiles to the same relative paths in its own checkout; a missing profile fails the base analysis. Profiles from another runner, such as those in a downloaded `baseline`, are reported as inconclusive: two runners measured the same build 22 to 32% apart. See [CPU cost in CI](docs/cpu.md#in-ci).
+The comment includes CPU changes when `args` lists `--profile` files and both builds were profiled in the same job. `args` runs in both checkouts, so write each build's profiles to the same relative paths in its own checkout; a missing profile fails the base analysis. Profiles from another runner, such as those in a downloaded `baseline`, are reported as inconclusive: two runners measured the same build 22 to 32% apart. Profile on a Linux runner: GitHub's macOS runners sampled a third to an eighth as often, so far fewer sources reach 10 samples per run. See [CPU cost in CI](docs/cpu.md#in-ci).
 
 ## Development
 
@@ -351,7 +362,7 @@ pnpm test:corpus
 pnpm test:package
 ```
 
-CI runs Rust tests on Linux and macOS, checks the minimum Rust version on Linux, and exercises the HTML report, input adapters, collector, and five real bundler builds in Chromium on both platforms. See [CONTRIBUTING.md](CONTRIBUTING.md) for test boundaries and fixtures.
+CI runs Rust tests on Linux and macOS, checks the minimum Rust version on Linux, and exercises the HTML report, input adapters, collector, CPU profiles, and five real bundler builds in Chromium on both platforms. See [CONTRIBUTING.md](CONTRIBUTING.md) for test boundaries and fixtures.
 
 A [reproducible comparison](benchmarks/RESULTS.md) and [explorer measurements](benchmarks/MVP.md) record performance and compatibility on one saved build. These are development measurements, not a general performance ranking or proof of attribution accuracy across bundlers.
 
