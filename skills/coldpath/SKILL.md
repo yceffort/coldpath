@@ -60,7 +60,7 @@ npx next build
 npx next start -p 3000
 ```
 
-In the scenario file use `"dir": ".next/static"` and `"prefix": "/_next/static/"`. Pass `--graph artifacts/graph.json --graph-root .` (the same Turbopack root) to `analyze`. The adapter is tested against Next.js 16.3.6 and the format is experimental; if it fails on another version, report the error rather than guessing a workaround.
+In the scenario file use `"dir": ".next/static"` and `"prefix": "/_next/static/"`. Pass `--graph artifacts/graph.json --graph-root .` (the same Turbopack root) to `analyze`. The adapter is tested against Next.js 16.3.8 and the format is experimental; if it fails on another version, report the error rather than guessing a workaround.
 
 ## Scenarios
 

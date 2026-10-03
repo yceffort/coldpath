@@ -74,7 +74,7 @@ Locations tagged `plugin-input` refer to the text seen by this plugin. Earlier t
 
 ## Next.js / Turbopack
 
-Tested with **Next.js 16.3.6**. Enable production browser source maps in Next configuration. Run the native analyzer from the same checkout as the production build:
+Tested with **Next.js 16.3.8**. Enable production browser source maps in Next configuration. Run the native analyzer from the same checkout as the production build:
 
 ```sh
 pnpm exec next experimental-analyze --output
