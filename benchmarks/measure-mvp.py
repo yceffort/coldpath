@@ -34,7 +34,7 @@ def command(job, output):
     html = job['mode'] != 'json'
     if job['tool'] == 'sme':
         mode = ('static-html' if html else 'static') if static else ('html' if html else 'json')
-        return [args.node, 'benchmarks/run-tool.mjs', 'sme', str(dataset), str(output), mode, 'relaxed']
+        return [args.node, 'benchmarks/run-tool.ts', 'sme', str(dataset), str(output), mode, 'relaxed']
     cmd = [args.before if job['tool'] == 'before' else 'target/release/coldpath', '--dir', str(dataset / 'files')]
     if not static:
         cmd += ['--coverage', str(dataset / 'playwright.json'), '--url-prefix', 'https://comparison.invalid/']

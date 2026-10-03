@@ -28,7 +28,7 @@ for tool in ['coldpath', 'sme']:
 def command(job, output):
     dataset = base / 'inputs' / job['dataset']
     if job['tool'] != 'coldpath':
-        return [args.node, 'benchmarks/run-tool.mjs', job['tool'], str(dataset), str(output),
+        return [args.node, 'benchmarks/run-tool.ts', job['tool'], str(dataset), str(output),
                 job['mode'], 'relaxed' if job['tool'] == 'sme' else 'default']
     cmd = ['target/release/coldpath', '--dir', str(dataset / 'files')]
     if job['mode'] != 'static':

@@ -3,4 +3,5 @@ pnpm-lock.yaml
 examples/recorded/**
 target/**
 artifacts/**
+build/**
 node_modules/**

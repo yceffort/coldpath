@@ -67,7 +67,7 @@ Each entry also records the Chrome DevTools Protocol `initiator` type and `start
 
 ### Checked builds
 
-`scripts/verify-recovery.mjs` (part of `pnpm test:corpus`) builds the corpus with source maps, recovers modules while ignoring the maps, and uses the maps as ground truth: each recovered module should contain mapping segments from exactly one original source, no source may own two recovered modules in one chunk, and no original code may sit outside the recovered modules. Measured on 2026-09-27:
+`scripts/verify-recovery.ts` (part of `pnpm test:corpus`) builds the corpus with source maps, recovers modules while ignoring the maps, and uses the maps as ground truth: each recovered module should contain mapping segments from exactly one original source, no source may own two recovered modules in one chunk, and no original code may sit outside the recovered modules. Measured on 2026-09-27:
 
 | Build | Version | Chunks | Modules | Async loaders | One source | Several sources | No mapped source | Mappings outside modules |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -126,13 +126,13 @@ Identity guesses are checked mechanically. An evidence string is kept only if it
 
 ### Measuring identification accuracy
 
-`node scripts/label-accuracy.mjs [label options]` (run after `pnpm test:corpus`, which builds the corpus) removes the source maps from the corpus's webpack and Next.js builds, runs `modules`, `analyze`, and `label` on them, and scores every guess against the package that the real maps say each module came from (`scripts/label-score.mjs`). It calls the model provider. It reports separately:
+`node scripts/label-accuracy.ts [label options]` (run after `pnpm test:corpus`, which builds the corpus) removes the source maps from the corpus's webpack and Next.js builds, runs `modules`, `analyze`, and `label` on them, and scores every guess against the package that the real maps say each module came from (`scripts/label-score.ts`). It calls the model provider. It reports separately:
 
 - package or application: whether `kind` (`package` or `polyfill` versus anything else) matches whether the module's code lives under `node_modules`.
 - exact package: the package a guess names (`react-dom/client` names `react-dom`; scoped names are kept whole) must equal the owning package. Substring and same-family names do not count (`@snowplow/browser-tracker` is not `@snowplow/browser-tracker-core`); a different name counts only through an explicit alias passed to the scorer.
 - application features: counted, never scored, because there is no reference to check them against.
 
-Modules whose code comes from several packages, and guesses the evidence filter dropped, are counted and left out of both scores. One vendoring rule is built in: code under `next/dist/compiled/<package>` belongs to `<package>`. `scripts/verify-label-score.mjs` holds the scorer's negative and positive controls.
+Modules whose code comes from several packages, and guesses the evidence filter dropped, are counted and left out of both scores. One vendoring rule is built in: code under `next/dist/compiled/<package>` belongs to `<package>`. `scripts/verify-label-score.ts` holds the scorer's negative and positive controls.
 
 Measured on 2026-09-25 with `claude-haiku-4-5`, two runs each (the model's answers vary between runs), on the Next.js 16.3.6 Turbopack build (129 labeled modules):
 

@@ -16,13 +16,13 @@ pnpm --dir benchmarks install --frozen-lockfile
 From the repository root:
 
 ```sh
-node benchmarks/prepare.mjs
-node benchmarks/prepare.mjs --name recorded-union \
+node benchmarks/prepare.ts
+node benchmarks/prepare.ts --name recorded-union \
   --coverage examples/recorded/initial.coverage.json \
   --coverage examples/recorded/interaction.coverage.json
 
-node benchmarks/capture-regression.mjs
-node benchmarks/evaluate.mjs \
+node benchmarks/capture-regression.ts
+node benchmarks/evaluate.ts \
   recorded recorded-union regex-template regex-plain regex-control
 ```
 
@@ -35,14 +35,14 @@ The regression script creates three small valid JavaScript programs, runs them i
 The published measurements use the blog experiment's preserved baseline build and its `baseline-initial.coverage.json`. Generated bundles and original-source payloads are not checked into this repository. Use a saved build and a hash-bound capture from that exact build:
 
 ```sh
-node benchmarks/prepare.mjs --dir /path/to/saved/static \
+node benchmarks/prepare.ts --dir /path/to/saved/static \
   --coverage /path/to/initial.coverage.json --name blog-measured --measured
-node benchmarks/prepare.mjs --dir /path/to/saved/static \
+node benchmarks/prepare.ts --dir /path/to/saved/static \
   --coverage /path/to/initial.coverage.json --name blog-all
-node benchmarks/prepare.mjs --dir /path/to/saved/static \
+node benchmarks/prepare.ts --dir /path/to/saved/static \
   --coverage /path/to/initial.coverage.json --name blog-mapped --mapped
 
-node benchmarks/evaluate.mjs
+node benchmarks/evaluate.ts
 python3 benchmarks/measure.py --node node --rounds 9
 ```
 
@@ -65,9 +65,9 @@ Outputs:
 For a single manual run:
 
 ```sh
-node benchmarks/run-tool.mjs sme \
+node benchmarks/run-tool.ts sme \
   artifacts/comparison/inputs/blog-measured artifacts/comparison/manual/sme json relaxed
-node benchmarks/run-tool.mjs monocart \
+node benchmarks/run-tool.ts monocart \
   artifacts/comparison/inputs/blog-measured artifacts/comparison/manual/monocart html default
 ```
 

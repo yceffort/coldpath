@@ -9,27 +9,29 @@
   },
   "type": "module",
   "bin": {
-    "coldpath": "bin/coldpath.mjs"
+    "coldpath": "build/bin/coldpath.js"
   },
   "exports": {
-    "./rollup": "./lib/rollup.mjs",
-    "./vite": "./lib/rollup.mjs",
-    "./webpack": "./lib/webpack.mjs",
+    "./rollup": "./build/lib/rollup.js",
+    "./vite": "./build/lib/rollup.js",
+    "./webpack": "./build/lib/webpack.js",
     "./package.json": "./package.json"
   },
   "files": [
-    "bin",
-    "lib"
+    "build"
   ],
   "scripts": {
     "build": "cargo build --locked --release",
+    "build:js": "node -e \"fs.rmSync('build', {recursive: true, force: true})\" && tsc -p tsconfig.build.json",
+    "prepack": "node --run build:js",
     "test": "cargo test --locked && pnpm test:browser && pnpm test:corpus && pnpm test:package",
-    "test:corpus": "node scripts/verify-label-score.mjs && node scripts/verify-graphs.mjs && node scripts/verify-corpus.mjs && node scripts/verify-recovery.mjs",
-    "test:browser": "node scripts/verify.mjs && node scripts/verify-formats.mjs && node scripts/verify-collector.mjs && node scripts/verify-environment.mjs && node scripts/verify-flows.mjs && node scripts/verify-treemap.mjs && node scripts/verify-comparison.mjs && node scripts/verify-inferred.mjs && node scripts/verify-profile.mjs",
-    "collect": "node bin/coldpath.mjs collect",
-    "test:package": "node scripts/verify-package.mjs",
-    "lint": "oxlint --deny-warnings bin lib scripts benchmarks examples/demo && oxfmt --check bin lib scripts benchmarks/*.mjs examples/demo",
-    "format": "oxfmt bin lib scripts benchmarks/*.mjs examples/demo"
+    "test:corpus": "node --run build:js && node scripts/verify-label-score.ts && node scripts/verify-graphs.ts && node scripts/verify-corpus.ts && node scripts/verify-recovery.ts",
+    "test:browser": "node --run build:js && node scripts/verify.ts && node scripts/verify-formats.ts && node scripts/verify-collector.ts && node scripts/verify-environment.ts && node scripts/verify-flows.ts && node scripts/verify-treemap.ts && node scripts/verify-comparison.ts && node scripts/verify-inferred.ts && node scripts/verify-profile.ts",
+    "collect": "node bin/coldpath.ts collect",
+    "test:package": "node scripts/verify-package.ts",
+    "lint": "oxlint --deny-warnings bin lib scripts benchmarks examples/demo && oxfmt --check bin lib scripts benchmarks/*.ts examples/demo",
+    "typecheck": "tsc -p tsconfig.json",
+    "format": "oxfmt bin lib scripts benchmarks/*.ts examples/demo"
   },
   "dependencies": {
     "@babel/parser": "7.29.9"
@@ -50,6 +52,7 @@
     "@anthropic-ai/sdk": "0.128.0",
     "@jridgewell/trace-mapping": "0.3.31",
     "@playwright/test": "1.63.0",
+    "@types/node": "24.19.1",
     "esbuild": "0.28.2",
     "next": "16.3.6",
     "oxfmt": "0.70.0",
@@ -57,6 +60,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "rollup": "4.63.4",
+    "typescript": "7.0.2",
     "vite": "8.3.0",
     "webpack": "5.111.1"
   },

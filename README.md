@@ -180,14 +180,14 @@ The action is "review lazy loading" because those 48 B are only top-level declar
 
 ![The Action's sticky pull request comment with observed, unobserved, and package totals](docs/images/pr-comment.png)
 
-To reproduce this walkthrough from a checkout, run `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, and `cargo build --locked --release`, then:
+To reproduce this walkthrough from a checkout, run `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, `pnpm build:js` (which compiles the Vite plugin the demo imports), and `cargo build --locked --release`, then:
 
 ```sh
 pnpm exec vite build examples/demo
 pnpm exec vite preview examples/demo --port 4173 --host 127.0.0.1   # in another terminal
 cd examples/demo
-node ../../bin/coldpath.mjs collect --scenarios coldpath.scenarios.json
-COLDPATH_ANALYZER=../../target/release/coldpath node ../../bin/coldpath.mjs analyze \
+node ../../bin/coldpath.ts collect --scenarios coldpath.scenarios.json
+COLDPATH_ANALYZER=../../target/release/coldpath node ../../bin/coldpath.ts analyze \
   --scenarios coldpath.scenarios.json --graph dist/coldpath.graph.json \
   --source-compression --details --treemap artifacts/report.html
 ```

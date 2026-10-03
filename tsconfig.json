@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024", "dom"],
+    "module": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
+    "skipLibCheck": true,
+    // verify-corpus imports the plugins by package name. The exports point at build/, which exists only after `pnpm build:js`.
+    "paths": {
+      "@yceffort/coldpath/rollup": ["./lib/rollup.ts"],
+      "@yceffort/coldpath/vite": ["./lib/rollup.ts"],
+      "@yceffort/coldpath/webpack": ["./lib/webpack.ts"]
+    }
+  },
+  "include": ["bin", "lib", "scripts", "benchmarks/*.ts"]
+}

@@ -100,7 +100,7 @@ The `never` function is created but never called. Native V8 records `[65, 96)` w
 
 The installed `monocart-locator` identifies the `//` inside the escaped-slash regular expression as a line comment spanning `[33, 97)`. Monocart's `fixSourceRange` then moves the uncalled function's start from 65 to 97 while its end remains 96. The invalid interval is discarded. The same issue occurs without the template literal. Replacing the regular-expression call with `replaceAll('/', '-')` restores the expected 31 uncovered units.
 
-The evidence is in [correctness.json](results/correctness.json), including the exact source, native range, detected comment, and adjusted range. [capture-regression.mjs](capture-regression.mjs) recreates the recordings. No installed dependency was patched. The same comment/range adjustment was inspected in an affected real chunk; the entire 98,280-unit aggregate discrepancy was not reduced to individual minimal cases. This is a demonstrated failure in the tested version/dependency combination, not a claim that all Monocart coverage is inaccurate.
+The evidence is in [correctness.json](results/correctness.json), including the exact source, native range, detected comment, and adjusted range. [capture-regression.ts](capture-regression.ts) recreates the recordings. No installed dependency was patched. The same comment/range adjustment was inspected in an affected real chunk; the entire 98,280-unit aggregate discrepancy was not reduced to individual minimal cases. This is a demonstrated failure in the tested version/dependency combination, not a claim that all Monocart coverage is inaccurate.
 
 ## Implications for coldpath
 
