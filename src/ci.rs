@@ -240,6 +240,9 @@ pub fn markdown(report: &Report) -> String {
                 scenario.totals.delta.unobserved_bytes, scenario.totals.delta.unmeasured_bytes));
             changes_markdown(&mut out, "Sources", &scenario.sources);
         }
+        if let Some(cpu) = &comparison.cpu {
+            cpu_changes_markdown(&mut out, cpu);
+        }
         for warning in &comparison.warnings {
             out.push_str(&format!("\n- {}\n", escape_markdown(warning)));
         }
@@ -270,6 +273,74 @@ fn cpu_row(out: &mut String, name: &str, cost: &crate::cpu::Cost) {
             crate::cpu::CpuStatus::Insufficient => "insufficient",
         }
     ));
+}
+
+fn cpu_changes_markdown(out: &mut String, cpu: &crate::cpu::CpuComparison) {
+    let count = |change: &str| {
+        cpu.sources
+            .iter()
+            .filter(|row| row.change == change)
+            .count()
+    };
+    out.push_str(&format!(
+        "\n### CPU change from baseline\n\n{} regressed, {} improved, {} unchanged, {} inconclusive. Per source and window, a Mann-Whitney U test over per-run self time, Holm-adjusted across {} compared rows: a change needs an adjusted p-value below {} and a Hodges-Lehmann shift of at least {}% of the baseline median. Rows with insufficient samples in either report are inconclusive, not unchanged.\n",
+        count("regressed"),
+        count("improved"),
+        count("unchanged"),
+        count("inconclusive"),
+        cpu.compared,
+        cpu.alpha,
+        cpu.min_effect * 100.0
+    ));
+    let side = |summary: &Option<crate::cpu::CostSummary>| match summary {
+        Some(s) => format!(
+            "{} ({} samples{})",
+            milliseconds(s.median_us),
+            s.median_samples,
+            if s.status == crate::cpu::CpuStatus::Measured {
+                ""
+            } else {
+                ", insufficient"
+            }
+        ),
+        None => "not sampled".into(),
+    };
+    let measured = |summary: &Option<crate::cpu::CostSummary>| {
+        summary
+            .as_ref()
+            .is_some_and(|s| s.status == crate::cpu::CpuStatus::Measured)
+    };
+    let rows = cpu
+        .sources
+        .iter()
+        .filter(|row| {
+            matches!(row.change, "regressed" | "improved")
+                || (row.change == "inconclusive" && (measured(&row.before) || measured(&row.after)))
+        })
+        .take(20)
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return;
+    }
+    out.push_str("\n| Scenario | Window | Source | Change | Before ms | After ms | Shift | Adjusted p |\n| --- | --- | --- | --- | ---: | ---: | ---: | ---: |\n");
+    for row in rows {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            escape_markdown(&row.scenario),
+            row.window,
+            escape_markdown(&row.source),
+            row.change,
+            side(&row.before),
+            side(&row.after),
+            match (row.shift_us, row.relative_shift) {
+                (Some(shift), Some(relative)) =>
+                    format!("{:+.2} ms ({:+.0}%)", shift / 1000.0, relative * 100.0),
+                _ => "-".into(),
+            },
+            row.adjusted_p_value
+                .map_or_else(|| "-".into(), |p| format!("{p:.2e}"))
+        ));
+    }
 }
 
 fn changes_markdown(out: &mut String, label: &str, rows: &[crate::baseline::Change]) {

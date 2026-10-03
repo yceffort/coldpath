@@ -12,6 +12,9 @@ pub struct Comparison {
     pub bundles: Vec<Change>,
     pub scenarios: Vec<ScenarioComparison>,
     pub warnings: Vec<String>,
+    /// Present when both reports have CPU profiles.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<crate::cpu::CpuComparison>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +58,8 @@ struct Snapshot {
     packages: Vec<Row>,
     bundles: Vec<Row>,
     scenario_reports: Vec<ScenarioSnapshot>,
+    #[serde(default)]
+    cpu: Option<crate::cpu::CpuReport>,
 }
 
 #[derive(Deserialize)]
@@ -226,6 +231,20 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
             });
         }
     }
+    let cpu = match (&baseline.cpu, &report.cpu) {
+        (Some(before), Some(after)) => Some(crate::cpu::compare(before, after, &mut warnings)?),
+        (None, Some(_)) => {
+            warnings
+                .push("The baseline has no CPU profiles; CPU self time is not compared.".into());
+            None
+        }
+        (Some(_), None) => {
+            warnings
+                .push("Only the baseline has CPU profiles; CPU self time is not compared.".into());
+            None
+        }
+        (None, None) => None,
+    };
     Ok(Comparison {
         totals: Change::new("total".into(), Some(&baseline.totals), Some(&report.totals)),
         sources: rows(
@@ -248,5 +267,6 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
         )?,
         scenarios,
         warnings,
+        cpu,
     })
 }

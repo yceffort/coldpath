@@ -380,6 +380,176 @@ fn excluded_and_unselected_bundles_keep_their_samples_in_a_bucket() {
     );
 }
 
+/// Ten runs of one load window with 1 µs per sample, so self time equals samples.
+fn ten_runs(rows: &[(usize, [u64; 10])], environment: Value) -> Value {
+    let us = |samples: &[u64]| {
+        samples
+            .iter()
+            .map(|&count| count as f64)
+            .collect::<Vec<_>>()
+    };
+    let functions = rows
+        .iter()
+        .map(|(offset, samples)| json!({"offset": offset, "windows": {"load": cell(samples, &us(samples))}}))
+        .collect::<Vec<_>>();
+    let mut idle = [1000u64; 10];
+    for (_, samples) in rows {
+        for (idle, count) in idle.iter_mut().zip(samples) {
+            *idle -= count;
+        }
+    }
+    json!({"schemaVersion":1,"scenario":"open","runs":10,"samplingIntervalUs":100,"environment":environment,
+        "windows":{"load":{"durationUs":(vec![1000; 10]),"buckets":{"(idle)":cell(&idle, &us(&idle))}}},
+        "scripts":[{"path":"app.js","topLevel":{"load":cell(&[0; 10], &[0.0; 10])},"functions":functions}]})
+}
+
+#[test]
+fn baseline_reports_significant_changes_and_never_calls_missing_evidence_unchanged() {
+    let f = three_sources();
+    // No ties, so the rank test is exact.
+    let steady = [100, 101, 99, 102, 98, 104, 103, 97, 96, 105];
+    let slower = steady.map(|value| value + 50);
+    let jitter = [101, 100, 99, 98, 102, 103, 104, 97, 105, 96];
+    let sparse = [1, 2, 1, 0, 3, 1, 2, 1, 0, 1];
+    let environment = json!({"cpuSlowdown": 1});
+    let before = f
+        .analyze(&[f.profile(
+            "before.json",
+            ten_runs(
+                &[(1, steady), (5, steady), (9, sparse)],
+                environment.clone(),
+            ),
+        )])
+        .unwrap();
+    let after = f
+        .analyze(&[f.profile(
+            "after.json",
+            ten_runs(
+                &[(1, slower), (5, jitter), (9, sparse)],
+                environment.clone(),
+            ),
+        )])
+        .unwrap();
+    let comparison =
+        coldpath::baseline::compare(&after, &serde_json::to_vec(&before).unwrap()).unwrap();
+    let cpu = comparison.cpu.unwrap();
+    assert_eq!(cpu.compared, 2);
+    let row = |name: &str| cpu.sources.iter().find(|r| r.source == name).unwrap();
+    let a = row("src/a.js");
+    assert_eq!(a.change, "regressed");
+    assert_eq!(a.shift_us, Some(50.0));
+    assert!((a.relative_shift.unwrap() - 50.0 / 100.5).abs() < 1e-9);
+    // Complete separation of 10 vs 10, Holm-adjusted over the two compared rows.
+    assert!((a.p_value.unwrap() - 2.0 / 184_756.0).abs() < 1e-12);
+    assert!((a.adjusted_p_value.unwrap() - 4.0 / 184_756.0).abs() < 1e-12);
+    assert_eq!(row("src/b.js").change, "unchanged");
+    let package = row("node_modules/pkg/index.js");
+    assert_eq!(package.change, "inconclusive", "insufficient on both sides");
+    assert!(package.p_value.is_none());
+    assert_eq!(cpu.sources[0].source, "src/a.js", "changes first");
+
+    // The same build twice: nothing to report.
+    let again = f
+        .analyze(&[f.profile(
+            "again.json",
+            ten_runs(
+                &[(1, jitter), (5, steady), (9, sparse)],
+                environment.clone(),
+            ),
+        )])
+        .unwrap();
+    let same = coldpath::baseline::compare(&again, &serde_json::to_vec(&before).unwrap())
+        .unwrap()
+        .cpu
+        .unwrap();
+    assert!(
+        same.sources
+            .iter()
+            .all(|r| !matches!(r.change, "regressed" | "improved"))
+    );
+
+    // A source measured only after the change, and a source no longer sampled.
+    let moved = f
+        .analyze(&[f.profile("moved.json", ten_runs(&[(5, slower)], environment))])
+        .unwrap();
+    let rows = coldpath::baseline::compare(&moved, &serde_json::to_vec(&before).unwrap())
+        .unwrap()
+        .cpu
+        .unwrap()
+        .sources;
+    let gone = rows.iter().find(|r| r.source == "src/a.js").unwrap();
+    assert_eq!((gone.change, gone.after.is_none()), ("inconclusive", true));
+
+    // Different throttling makes every row inconclusive, with a warning.
+    let throttled = f
+        .analyze(&[f.profile(
+            "throttled.json",
+            ten_runs(&[(1, slower), (5, jitter)], json!({"cpuSlowdown": 4})),
+        )])
+        .unwrap();
+    let comparison =
+        coldpath::baseline::compare(&throttled, &serde_json::to_vec(&before).unwrap()).unwrap();
+    assert!(
+        comparison
+            .cpu
+            .unwrap()
+            .sources
+            .iter()
+            .all(|r| r.change == "inconclusive")
+    );
+    assert!(
+        comparison
+            .warnings
+            .iter()
+            .any(|w| w.contains("differs from the baseline in cpuSlowdown"))
+    );
+
+    // A baseline's summary fields are recomputed from its per-run values.
+    let sparse_before = f
+        .analyze(&[f.profile(
+            "sparse.json",
+            ten_runs(&[(5, sparse)], json!({"cpuSlowdown": 1})),
+        )])
+        .unwrap();
+    let mut forged = serde_json::to_value(&sparse_before).unwrap();
+    let row = &mut forged["cpu"]["scenarios"][0]["windows"][0]["sources"][0];
+    assert_eq!(row["source"], "src/b.js");
+    row["status"] = json!("measured");
+    row["medianSamples"] = json!(100);
+    row["medianUs"] = json!(100);
+    let rows = coldpath::baseline::compare(&moved, &serde_json::to_vec(&forged).unwrap())
+        .unwrap()
+        .cpu
+        .unwrap()
+        .sources;
+    let b = rows.iter().find(|r| r.source == "src/b.js").unwrap();
+    assert_eq!(b.change, "inconclusive");
+    assert_eq!(
+        b.before.as_ref().unwrap().status,
+        cpu::CpuStatus::Insufficient
+    );
+    let mut single = serde_json::to_value(&sparse_before).unwrap();
+    single["cpu"]["scenarios"][0]["runs"] = json!(1);
+    assert!(
+        coldpath::baseline::compare(&moved, &serde_json::to_vec(&single).unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("invalid baseline CPU data")
+    );
+
+    // Only one report has profiles.
+    let plain = f.analyze(&[]).unwrap();
+    let comparison =
+        coldpath::baseline::compare(&after, &serde_json::to_vec(&plain).unwrap()).unwrap();
+    assert!(comparison.cpu.is_none());
+    assert!(
+        comparison
+            .warnings
+            .iter()
+            .any(|w| w.contains("no CPU profiles"))
+    );
+}
+
 #[test]
 fn cli_writes_cpu_reports_and_exports_profiles_as_evidence() {
     let f = three_sources();

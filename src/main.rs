@@ -650,6 +650,36 @@ fn main() -> Result<()> {
         {
             status!("{:+12}  {} ({})", row.delta.bytes, row.name, row.change);
         }
+        if let Some(cpu) = &comparison.cpu {
+            let count = |change: &str| {
+                cpu.sources
+                    .iter()
+                    .filter(|row| row.change == change)
+                    .count()
+            };
+            status!(
+                "CPU change from baseline: {} regressed | {} improved | {} unchanged | {} inconclusive",
+                count("regressed"),
+                count("improved"),
+                count("unchanged"),
+                count("inconclusive")
+            );
+            for row in cpu
+                .sources
+                .iter()
+                .filter(|row| matches!(row.change, "regressed" | "improved"))
+                .take(args.limit)
+            {
+                status!(
+                    "{:+12.2} ms  {} ({}, {} window, {})",
+                    row.shift_us.unwrap_or_default() / 1000.0,
+                    row.source,
+                    row.scenario,
+                    row.window,
+                    row.change
+                );
+            }
+        }
     }
     for scenario in &report.scenario_reports {
         status!(

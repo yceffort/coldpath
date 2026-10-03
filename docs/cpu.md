@@ -105,6 +105,23 @@ Markdown lists, per scenario and window, the 20 sources with the largest median 
 
 A row is `insufficient` when its median self samples per run is below 10. Such a value is shown with its samples so it is not mistaken for a cost of zero, but it is not reliable. In the demo, `ReportChart.jsx` renders in the `open-report` action window in microseconds; its median was 0 to 2 samples per run on every machine and condition measured, so it is reported as `insufficient`. `format.js` creates `Intl.NumberFormat` instances during page load and is measured at about 3.9 ms on an Apple M5.
 
+## Compare with a baseline
+
+When the current report and the `--baseline` report both have profiles, `baseline.cpu` compares every source in every scenario window present in either report:
+
+- `before` and `after`: status, median self time with quartiles, and median samples per run, or `null` when the report has no row.
+- `shiftUs`: the Hodges-Lehmann shift of per-run self time, after minus before; `relativeShift`: the shift divided by the baseline median.
+- `pValue`: a two-sided Mann-Whitney U test of the per-run values, exact without ties and otherwise a normal approximation with tie and continuity corrections; `adjustedPValue`: Holm-adjusted across all compared rows (`compared`).
+- `change`: `regressed` or `improved` when the adjusted p-value is below 0.05 and the shift is at least 25% of the baseline median; `unchanged` when the shift is smaller than 25%; `inconclusive` otherwise.
+
+A row that is `insufficient` or missing in either report is `inconclusive`, never `unchanged`, even when the other report measured a large value; Markdown lists those rows with both reports' samples so they are not hidden. A scenario whose profile `environment` (browser, emulation, throttling, or machine) or sampling interval differs from the baseline is `inconclusive` in every row, with a warning naming the difference.
+
+Profile the baseline and the current build on the same machine in one session, back to back. The machine identity includes the CPU model, core count, and boot. Two GitHub-hosted runners measured the same sources a median 22 to 24% apart and up to 32%, more than the minimum effect, and the Apple M5's medians differed from either runner's by 83 to 199%.
+
+### In CI
+
+Comparisons are meaningful within one job: build the base and the pull request, profile both on that runner, and pass the profiles to both analyses. With the [GitHub Action](../README.md#github-action), list the profile files in `args` and use `base-directory`; the comment then includes CPU changes. A `baseline` report from another run carries profiles from another machine, so its CPU rows are inconclusive. Runners are noisier than a workstation (see below); `--runs 20` narrows the spread.
+
 ## How the defaults were chosen
 
 Issue [#24](https://github.com/yceffort/coldpath/issues/24) profiled the demo and the corpus Vite and webpack builds 20 times per scenario on an Apple M5 and on two GitHub-hosted ubuntu runners (Intel Xeon Platinum 8573C and AMD EPYC 9V45, 4 vCPUs each), with `cpuSlowdown` 1 and 4 and sampling intervals of 100 µs and 1 ms.
@@ -113,6 +130,7 @@ Issue [#24](https://github.com/yceffort/coldpath/issues/24) profiled the demo an
 - **Self time from sample timestamps.** Samples times the window's average interval agreed with timestamps within 2% on the M5 without throttling, but differed by up to 51% on a runner without throttling and by up to 94% with `cpuSlowdown` 4: sampling is irregular on shared VMs and under throttling.
 - **10 samples per run.** Without throttling, sources with 10 or more samples per run varied between runs by a coefficient of variation of 0.02 to 0.08 on the M5 and 0.11 to 0.20 on the runners; below 5 samples it was 0.5 or more.
 - **10 runs.** The median's spread across resamples (relative interquartile range) was about 3% on the M5 and 6 to 8% on the runners with 10 runs, and 3 to 6% on the runners with 20.
+- **25% minimum effect.** Comparing the first 10 runs with the last 10 of the same build never reported a change. Over 2,000 random 10-and-10 splits, the rule above reported a change in 0% of splits on the M5 and 0.6% on the runners; with a 20% minimum it would be 1.4 to 1.5%.
 - **CPU throttling is optional.** Profiles use the scenario's `cpuSlowdown`, like coverage. At 4, self time grew about fourfold but samples only 1.7 times on the M5 and 2 times on the runners; run-to-run variation rose on the M5 and stayed about the same on the runners.
 
 The corpus fixtures do almost no work: every corpus source stayed below 10 samples per run in every condition, at most 7.
