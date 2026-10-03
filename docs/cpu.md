@@ -3,7 +3,7 @@
 coldpath can add a CPU axis to the same sources it already explains: per-source self time in each scenario, measured in separate profile runs and joined with the byte, coverage, and import evidence. Three rules shape the output:
 
 - Executed is not expensive, and expensive is not unnecessary.
-- Not sampled is not cheap. A source the profiler rarely or never hit is reported as `insufficient`, never as a small number.
+- Not sampled is not cheap. A source the profiler rarely hit is reported as `insufficient`, and one it never hit as having no function samples, never as a small number.
 - A CPU number is a distribution over runs, reported with its sample count and spread, never one run's value.
 
 ## Record profiles
@@ -12,7 +12,7 @@ coldpath can add a CPU axis to the same sources it already explains: per-source 
 coldpath profile --scenarios coldpath.scenarios.json [--runs N]
 ```
 
-`profile` reads the same [scenario file](collecting.md#scenario-files) as `collect`, including device, network, CPU throttling, and storage state, and writes `<out>/<name>.profile.json` next to the coverage files. Each run is a fresh browser. Only the V8 sampling profiler runs while a window is measured; the collector enables the debugger after profiling stops and then checks every loaded script under `--prefix` or `--cdn-prefix` against the file in `dir` with SHA-256, as `collect` does. A stale build fails the run.
+`profile` reads the same [scenario file](collecting.md#scenario-files) as `collect`, including device, network, CPU throttling, and storage state, and writes `<out>/<name>.profile.json` next to the coverage files. Each run is a fresh browser. Only the V8 sampling profiler runs while a window is measured; the collector enables the debugger after profiling stops and then checks every loaded script under `--prefix` or `--cdn-prefix` against the file in `dir` with SHA-256, as `collect` does; a sampled script that V8 already discarded, such as one that ran once, is checked from its network response. A stale build fails the run, and so does a run in which no script matches the prefixes.
 
 Each run records two windows:
 
@@ -24,7 +24,7 @@ Runs alternate between scenarios (run 1 of every scenario, then run 2), so slow 
 Scope:
 
 - Only the page's main thread is profiled. Workers run in their own isolates and are not recorded; `profile` prints a warning when a scenario starts one.
-- Multi-document navigation flows are not supported. A navigation to a new document after the initial load fails the run; profile each page as its own scenario.
+- Multi-document navigation flows are not supported. A navigation that commits a new document after the initial load fails the run (a download or a 204 response commits none); profile each page as its own scenario.
 - Playwright evaluates selectors and waits inside the page, on the same main thread. That time appears in the `(other scripts)` bucket of action windows, not in any source.
 
 The file binds each loaded script by `path`, `sha256`, and `sourceMapSha256`, like a coverage envelope, and stores self samples and self time per function start offset instead of raw profiles. Each value is a cell with one entry per run. An abbreviated two-run file:
@@ -75,9 +75,9 @@ coldpath analyze --scenarios coldpath.scenarios.json \
   --json artifacts/report.json --markdown artifacts/summary.md --treemap artifacts/report.html
 ```
 
-`--profile` is repeatable, one file per scenario, and works with or without coverage. A profile binds to an analyzed bundle by path and SHA-256, and to its source map by SHA-256; a mismatch is an error, like stale coverage. Profiles of bundles left out by `--include`/`--exclude` or by a file selection move to the `(excluded bundles)` bucket. A profile that references a file missing from the analysis root is an error. Without `--profile` the output is unchanged.
+`--profile` is repeatable, one file per scenario, and works with or without coverage. `analyze --scenarios` also adds every scenario's coverage file, so run `collect` first, or pass `--dir` and `--profile` to the analyzer alone, as in `coldpath --dir dist --profile artifacts/coverage/initial.profile.json`. A profile binds to an analyzed bundle by path and SHA-256, and to its source map by SHA-256; a mismatch is an error, like stale coverage. Profiles of bundles left out by `--include`/`--exclude` or by a file selection move to the `(excluded bundles)` bucket. A profile that references a file missing from the analysis root is an error. Without `--profile` the output is unchanged.
 
-Attribution follows the function, not the line: minified bundles are mostly one line, so V8's per-line ticks cannot separate sources. Each function's self time goes to the source that owns the byte at its start position, by the same source-map attribution as bytes. Code a minifier inlined into another function counts toward that containing function. Module evaluation that runs in a bundle's top level (for example a scope-hoisted Vite or Rollup chunk) is reported per bundle under `topLevel`, because no single source owns it.
+Attribution follows the function, not the line: minified bundles are mostly one line, so V8's per-line ticks cannot separate sources. Each function's self time goes to the source that owns the byte at its start position, by the same source-map attribution as bytes. Code a minifier inlined into another function counts toward that containing function. Module evaluation that runs in a bundle's top level (for example a scope-hoisted Vite or Rollup chunk) is reported per bundle under `topLevel`, because no single source owns it. A function that starts in bytes no source owns counts toward `[unmapped]`; in webpack builds, every module factory starts in such a wrapper, so module evaluation lands in `[unmapped]` rather than in each module's row.
 
 The JSON report gets a separate `cpu` section; byte rows never contain CPU fields:
 
@@ -86,7 +86,7 @@ The JSON report gets a separate `cpu` section; byte rows never contain CPU field
 - `windows[]`: `window`, per-run `durationUs` and total `samples`, `medianDurationUs`, and rows in `sources` (with `package`), `packages`, `topLevel` (by bundle `path`), and `other` (buckets).
 - Every row: `status` (`measured` or `insufficient`), per-run `samples` and `selfUs`, `medianSamples`, and `medianUs`, `q1Us`, `q3Us`. Quartiles interpolate linearly between runs.
 
-A row exists when its functions were sampled in at least one run. A source of a bundle listed in `bundles` with no row in a window was not sampled there: its cost is below what the profiler resolved, not zero. A source whose bundles were not loaded has no CPU value for that scenario.
+A row exists when its functions were sampled in at least one run. A source of a bundle listed in `bundles` with no row in a window had no function samples there: its functions' cost is below what the profiler resolved, not zero, and its module-level code counts toward the bundle's `topLevel` (or `[unmapped]`, as above). A source whose bundles were not loaded has no CPU value for that scenario.
 
 Buckets in `other`:
 
@@ -96,10 +96,10 @@ Buckets in `other`:
 | `(garbage collector)` | V8 garbage collection. |
 | `(idle)` | The main thread was idle. |
 | `(native)` | Native API calls (DOM methods and other browser APIs) made directly from profiled bundles: scripts under the scenario's `prefix` or `cdnPrefixes`. |
-| `(other scripts)` | Scripts that are not profiled bundles (inline and evaluated code, other origins, Playwright's injected scripts) and the native calls they make. A bundle that V8 discarded before it could be verified also counts here, with a warning. |
+| `(other scripts)` | Scripts that are not profiled bundles (inline and evaluated code, other origins, Playwright's injected scripts) and the native calls they make. |
 | `(excluded bundles)` | Analyzed bundles left out by filters or by the file selection. |
 
-Markdown lists, per scenario and window, the 20 sources with the largest median self time, each bundle's top level, and the buckets. Selecting a source in the treemap shows its self time for every scenario window whose profile loaded one of its bundles, including `Not sampled`.
+Markdown lists, per scenario and window, the 10 sources and the 5 bundle top levels with the largest median self time, and the buckets; the JSON report has every row. The section follows the baseline comparison, so a long report does not push the byte changes out of a pull request comment. Selecting a source in the treemap shows its self time for every scenario window whose profile loaded one of its bundles, including `No function samples`, and the top level of those bundles where it was measured.
 
 ### Insufficient values
 
@@ -107,9 +107,9 @@ A row is `insufficient` when its median self samples per run is below 10. Such a
 
 ## Compare with a baseline
 
-When the current report and the `--baseline` report both have profiles, `baseline.cpu` compares every source in every scenario window present in either report:
+When the current report and the `--baseline` report both have profiles, `baseline.cpu` compares every source in each scenario window that both reports profiled. A scenario or window that only one report profiled is not compared, with a warning. Each row of `baseline.cpu.sources` has:
 
-- `before` and `after`: status, median self time with quartiles, and median samples per run, or `null` when the report has no row.
+- `before` and `after`: status, median self time with quartiles, and median samples per run. A source that the report's profiled bundles contain but that had no function samples counts as `insufficient` with zero samples; `null` means none of the report's profiled bundles contain the source.
 - `shiftUs`: the Hodges-Lehmann shift of per-run self time, after minus before; `relativeShift`: the shift divided by the baseline median.
 - `pValue`: a two-sided Mann-Whitney U test of the per-run values, exact without ties and otherwise a normal approximation with tie and continuity corrections; `adjustedPValue`: Holm-adjusted across all compared rows (`compared`).
 - `change`: `regressed` or `improved` when the adjusted p-value is below 0.05 and the shift is at least 25% of the baseline median; `unchanged` when the shift is smaller than 25%; `inconclusive` otherwise.
@@ -120,7 +120,7 @@ Profile the baseline and the current build on the same machine in one session, b
 
 ### In CI
 
-Comparisons are meaningful within one job: build the base and the pull request, profile both on that runner, and pass the profiles to both analyses. With the [GitHub Action](../README.md#github-action), list the profile files in `args` and use `base-directory`; the comment then includes CPU changes. A `baseline` report from another run carries profiles from another machine, so its CPU rows are inconclusive. Runners are noisier than a workstation (see below); `--runs 20` narrows the spread.
+Comparisons are meaningful within one job: build the base and the pull request, profile both on that runner, and pass the profiles to both analyses. With the [GitHub Action](../README.md#github-action), list the profile files in `args` and use `base-directory`; the comment then includes CPU changes. The same `args` run in the base checkout, so its profiles must be at the same relative paths there. A `baseline` report from another run carries profiles from another machine, so its CPU rows are inconclusive. Runners are noisier than a workstation (see below); `--runs 20` narrows the spread.
 
 ## How the defaults were chosen
 

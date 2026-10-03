@@ -907,6 +907,8 @@ pub fn analyze_with_options(
             report
                 .warnings
                 .push(format!("skipped profile data for unselected file: {path}"));
+            // Evidence export copies it, so a replay finds it unselected again.
+            report.read_files.push(file);
             profiles.exclude(&path);
         }
     }

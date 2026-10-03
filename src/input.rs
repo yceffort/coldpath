@@ -247,8 +247,10 @@ pub fn load(
     let mut scenarios = Vec::new();
     let mut warnings = Vec::new();
     for path in paths {
-        let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)
-            .with_context(|| format!("read coverage {}", path.display()))?;
+        let value: serde_json::Value = serde_json::from_slice(
+            &fs::read(path).with_context(|| format!("read coverage {}", path.display()))?,
+        )
+        .with_context(|| format!("read coverage {}", path.display()))?;
         if value.get("schemaVersion").is_some() {
             let file: CoverageFile =
                 serde_json::from_value(value).context("invalid coldpath coverage envelope")?;

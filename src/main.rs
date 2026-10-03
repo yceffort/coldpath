@@ -111,6 +111,7 @@ struct Args {
     loading: Option<PathBuf>,
     /// CPU profile from `coldpath profile`, bound to bundles by SHA-256. Repeat per scenario.
     #[arg(long)]
+    #[serde(default)]
     profile: Vec<PathBuf>,
     /// Print the import chain and available locations for a graph input or report source.
     #[arg(long)]

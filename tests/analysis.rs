@@ -701,6 +701,11 @@ fn coverage_missing_file_and_unsafe_path_fail() {
             .to_string()
             .contains("missing from analysis root")
     );
+    let absent = fixture.0.join("absent.coverage.json");
+    let error = analyze(&fixture.0, std::slice::from_ref(&absent))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(error, format!("read coverage {}", absent.display()));
 }
 
 #[test]
