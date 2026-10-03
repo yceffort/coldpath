@@ -103,6 +103,7 @@ try {
   )
   // The server runs in this process, so collection must not block the event loop.
   await promisify(execFile)(coldpath, ['collect', '--scenarios', 'coldpath.scenarios.json'], {cwd: project})
+  await promisify(execFile)(coldpath, ['profile', '--scenarios', 'coldpath.scenarios.json', '--runs', '2'], {cwd: project})
 } finally {
   await new Promise((resolve) => server.close(resolve))
 }
@@ -130,5 +131,5 @@ assert.throws(
   (error) => error.stderr.includes('received ["initial", "missing"], recorded ["initial", "interaction"]'),
 )
 console.log(
-  'Verified a fresh install: @yceffort/coldpath/rollup, coldpath graph, coldpath collect --scenarios, and coldpath analyze --scenarios with and without --scenario-order.',
+  'Verified a fresh install: @yceffort/coldpath/rollup, coldpath graph, coldpath collect --scenarios, coldpath profile --scenarios, and coldpath analyze --scenarios with and without --scenario-order.',
 )

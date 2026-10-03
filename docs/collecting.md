@@ -79,7 +79,7 @@ coldpath collect --scenarios coldpath.scenarios.json
 coldpath analyze --scenarios coldpath.scenarios.json --html artifacts/combined.html
 ```
 
-`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`). `analyze` adds `--dir`, one `--coverage` per scenario, `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, and the [environment options](#device-throttling-and-authenticated-state) can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
+`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`), and `coldpath profile` writes `<out>/<name>.profile.json` from the same file ([CPU cost](cpu.md)). `analyze` adds `--dir`, one `--coverage` per scenario, `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, and the [environment options](#device-throttling-and-authenticated-state) can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
 
 ## Device, throttling, and authenticated state
 
@@ -98,7 +98,7 @@ By default the collector uses a 1280x900 desktop viewport with no throttling and
 
 Explicit options override the device's values. The envelope's `environment` records the device name, viewport, effective user agent, scale factor, mobile and touch flags, network and CPU settings, and whether a storage state was loaded. It never records the storage state's contents or path. Keep storage state files out of version control; they usually contain session cookies.
 
-Throttling changes which code runs only when the application reacts to timing (for example, timeouts or network-dependent fallbacks). Coverage from throttled recordings is still not a performance measurement.
+Throttling changes which code runs only when the application reacts to timing (for example, timeouts or network-dependent fallbacks). Coverage from throttled recordings is still not a performance measurement; record [CPU profiles](cpu.md) for that.
 
 ## Multi-page flows
 

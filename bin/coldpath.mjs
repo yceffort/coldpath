@@ -7,6 +7,7 @@ import {collect} from '../lib/collect.mjs'
 import {exportGraph} from '../lib/export-graph.mjs'
 import {label} from '../lib/label.mjs'
 import {inferModules} from '../lib/modules.mjs'
+import {profile} from '../lib/profile.mjs'
 import {loadScenarios} from '../lib/scenarios.mjs'
 import {snapshot} from '../lib/snapshot.mjs'
 
@@ -15,6 +16,7 @@ const usage = `Usage:
   coldpath collect --url URL --dir DIRECTORY --out FILE [--prefix PATH] [--scenario NAME] [--actions FILE] [--wait-ms N]
                    [--cdn-prefix URL]... [--device NAME] [--viewport WxH] [--user-agent UA] [--device-scale-factor N] [--mobile] [--touch]
                    [--latency-ms N --download-kbps N --upload-kbps N] [--cpu-slowdown N] [--storage-state FILE]
+  coldpath profile --scenarios coldpath.scenarios.json [--runs N]
   coldpath graph --format esbuild|webpack|turbopack --input FILE --root BUILD_ROOT --out graph.json [--environment client|server|all]
   coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME]
   coldpath modules --dir DIRECTORY --out MAP_DIRECTORY [--maps-json maps.json]... [--chunks] [--graph FILE]
@@ -24,7 +26,7 @@ const usage = `Usage:
   coldpath --replay DIRECTORY [--json FILE] [--html FILE]
   coldpath [ANALYZER OPTIONS...]
 
-Run \`coldpath analyze --help\` for analyzer options. See docs/collecting.md, docs/graphs.md and docs/third-party.md.`
+Run \`coldpath analyze --help\` for analyzer options. See docs/collecting.md, docs/cpu.md, docs/graphs.md and docs/third-party.md.`
 
 const [command, ...rest] = process.argv.slice(2)
 
@@ -93,6 +95,13 @@ async function main() {
         : undefined,
       storageState: values['storage-state'],
     })
+    return 0
+  }
+  if (command === 'profile') {
+    const {values} = parseArgs({args: rest, options: {scenarios: {type: 'string'}, runs: {type: 'string'}}})
+    if (!values.scenarios) throw new Error('profile requires --scenarios FILE')
+    const {scenarios} = await loadScenarios(values.scenarios)
+    await profile(scenarios, values.runs === undefined ? {} : {runs: Number(values.runs)})
     return 0
   }
   if (command === 'graph') {
