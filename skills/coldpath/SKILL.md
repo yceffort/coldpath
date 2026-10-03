@@ -1,13 +1,13 @@
 ---
 name: coldpath
-description: Use when someone wants to know which JavaScript in a web app they build themselves runs on initial load versus only after an interaction, why a module ends up in the initial bundle, how much shipped JavaScript never executes, what to lazy load or split, or to enforce JavaScript byte budgets in CI. Applies to Vite, Rollup, webpack, esbuild, and Next.js builds with the @yceffort/coldpath package.
+description: Use when someone wants to know which JavaScript in a web app they build themselves runs on initial load versus only after an interaction, why a module ends up in the initial bundle, how much shipped JavaScript never executes, what to lazy load or split, which of their source files cost main-thread CPU time during page load or an interaction, whether a change made that CPU time worse, or to enforce JavaScript byte budgets in CI. Applies to Vite, Rollup, webpack, esbuild, and Next.js builds with the @yceffort/coldpath package.
 ---
 
 # coldpath
 
 ## Overview
 
-coldpath records V8 coverage of a production build in Chromium, attributes the executed bytes to original sources through source maps, and explains with the bundler's import graph why each source is loaded. Every number is evidence from the recorded scenarios only: code that no scenario ran is **unobserved**, which never means unused or safe to delete.
+coldpath records V8 coverage of a production build in Chromium, attributes the executed bytes to original sources through source maps, and explains with the bundler's import graph why each source is loaded. Every number is evidence from the recorded scenarios only: code that no scenario ran is **unobserved**, which never means unused or safe to delete. In separate runs it can also sample main-thread CPU and attribute self time to the same sources (see [CPU cost](#cpu-cost)).
 
 This skill covers apps whose build you control. For a site you cannot build (no source maps, `coldpath snapshot`, `coldpath modules`, `coldpath label`), stop and point the user to <https://github.com/yceffort/coldpath/blob/main/docs/third-party.md> instead of improvising.
 
@@ -34,7 +34,7 @@ This skill covers apps whose build you control. For a site you cannot build (no 
    ```
 
    `--scenarios` already supplies `--dir`, every `--coverage`, `--scenario-order` (file order), and `--initial-scenario` (the first scenario); pass one of them only to override it.
-7. **Read `artifacts/coldpath.md` and the stdout summary.** They are bounded (20 rows per table) and contain no code. For one source, run the same command with `--why src/path/File.jsx` to print its import chain. Do not add `--details` for your own reading: it embeds source code and span data, and the JSON easily reaches tens of MB. Offer `--details --treemap` to the user only as an HTML report to open in a browser.
+7. **Read `artifacts/coldpath.md` and the stdout summary.** They are bounded (about 20 rows per table) and contain no code. For one source, run the same command with `--why src/path/File.jsx` to print its import chain. Do not add `--details` for your own reading: it embeds source code and span data, and the JSON easily reaches tens of MB. Offer `--details --treemap` to the user only as an HTML report to open in a browser.
 
 ## Bundler setup
 
@@ -134,6 +134,43 @@ npx coldpath analyze --scenarios coldpath.scenarios.json --baseline artifacts/be
 ```
 
 Keep the earlier `--json` report as `before.json` before re-running. Only the new measurement shows the effect.
+
+## CPU cost
+
+For "which of our files make page load or this interaction slow", coldpath reports per-source CPU self time: the time V8's sampling profiler spent in each source's own functions, never in the functions they call. It needs a version whose `npx coldpath --help` lists `coldpath profile`; if that line is missing, tell the user CPU profiling needs a newer `@yceffort/coldpath` instead of profiling some other way.
+
+1. Build, serve, and write scenarios as above, then record both kinds of evidence: `npx coldpath collect --scenarios coldpath.scenarios.json` and `npx coldpath profile --scenarios coldpath.scenarios.json`. `profile` runs every scenario 10 times in fresh browsers with only the profiler on, sampling every 100 µs (fixed), and writes `<out>/<name>.profile.json` next to the coverage files.
+2. Analyze with one `--profile` per scenario. `--scenarios` adds the coverage files but never the profiles:
+
+   ```sh
+   npx coldpath analyze --scenarios coldpath.scenarios.json \
+     --profile artifacts/coverage/initial.profile.json \
+     --profile artifacts/coverage/open-report.profile.json \
+     --markdown artifacts/coldpath.md --json artifacts/coldpath.json
+   ```
+
+3. Read "CPU self time" in the Markdown. Every scenario has a `load` window (navigation until `networkidle`, plus 1 s), and a scenario with actions also has an `action` window, where an interaction's cost is. Report each row's median ms, Q1 to Q3, and samples per run together.
+
+| Row | How to read it |
+| --- | --- |
+| `measured` | a median of at least 10 self samples per run: a usable number |
+| `insufficient` | fewer samples: below what the profiler resolves, neither cheap nor zero. More runs narrow the spread but never raise samples per run |
+| no row (treemap: "No function samples") | its functions were never sampled in that window; read it like `insufficient` |
+| Top level of a bundle | module-level code of a scope-hoisted bundle (Vite, Rollup) that no single source owns |
+| `[unmapped]` | functions starting in bytes no source owns. In webpack builds every module factory starts there, so module evaluation lands here; it is not source map noise |
+| `(program)` | parsing, style, layout, and paint, which no source owns |
+| `(native)` | DOM and other browser API calls made directly from the bundles |
+| `(other scripts)` | scripts outside the analyzed bundles, including Playwright's own work during actions |
+
+Because self time excludes callees, a slow interaction's time often sits in framework or library code (`react-dom`, a chart library), `(native)`, and `(program)` rather than in the component that triggered it. Say so instead of calling that component cheap.
+
+### Comparing CPU
+
+CPU time depends on the machine: two GitHub-hosted runners measured the same build 22 to 32% apart. Compare only profiles of both builds made on one machine in one session, back to back, such as before and after an edit. Each profile records its environment, including the browser, throttling, CPU model, cores, and boot; any difference makes every row of that scenario `inconclusive`, with a warning. Analyze the earlier build with its `--profile` files and `--json artifacts/before.json`, then the new build with its own `--profile` files and `--baseline artifacts/before.json`.
+
+"CPU change from baseline" (`baseline.cpu` in JSON) marks a source and window `regressed` or `improved` only when a rank test across runs stays significant after Holm correction (adjusted p below 0.05) and the shift is at least 25% of the earlier median. `unchanged` means a shift under 25%; anything else, including insufficient or missing rows, is `inconclusive`. Report `inconclusive` as "no reliable comparison" and offer the same-session rerun.
+
+In CI, build and profile both the base and the pull request in one job. The GitHub Action runs `args` in both checkouts, so each checkout needs its own profiles at the same relative paths. There is no CPU budget flag: CPU changes are reported, not enforced.
 
 ## CI budgets
 
