@@ -1,6 +1,10 @@
 # CPU cost
 
-`coldpath profile` records CPU profiles of a scenario file's scenarios in runs separate from coverage, because the coverage collector's debugger and precise coverage change timing. A CPU number is a distribution over runs, recorded with its sample count, never one run's value.
+coldpath can add a CPU axis to the same sources it already explains: per-source self time in each scenario, measured in separate profile runs and joined with the byte, coverage, and import evidence. Three rules shape the output:
+
+- Executed is not expensive, and expensive is not unnecessary.
+- Not sampled is not cheap. A source the profiler rarely or never hit is reported as `insufficient`, never as a small number.
+- A CPU number is a distribution over runs, reported with its sample count and spread, never one run's value.
 
 ## Record profiles
 
@@ -62,12 +66,52 @@ The file binds each loaded script by `path`, `sha256`, and `sourceMapSha256`, li
 
 `offset` is the UTF-16 offset V8 reports for a function, which is the start of its parameter list, not the `function` keyword. It is not a coverage `startOffset`. Every sample of a window is counted exactly once: in a function, a script's top level, or a bucket. A sample lasts until the next sample of its window, as in the browser's Performance panel.
 
+## Join profiles in the report
+
+```sh
+coldpath analyze --scenarios coldpath.scenarios.json \
+  --profile artifacts/coverage/initial.profile.json \
+  --profile artifacts/coverage/open-report.profile.json \
+  --json artifacts/report.json --markdown artifacts/summary.md --treemap artifacts/report.html
+```
+
+`--profile` is repeatable, one file per scenario, and works with or without coverage. A profile binds to an analyzed bundle by path and SHA-256, and to its source map by SHA-256; a mismatch is an error, like stale coverage. Profiles of bundles left out by `--include`/`--exclude` or by a file selection move to the `(excluded bundles)` bucket. A profile that references a file missing from the analysis root is an error. Without `--profile` the output is unchanged.
+
+Attribution follows the function, not the line: minified bundles are mostly one line, so V8's per-line ticks cannot separate sources. Each function's self time goes to the source that owns the byte at its start position, by the same source-map attribution as bytes. Code a minifier inlined into another function counts toward that containing function. Module evaluation that runs in a bundle's top level (for example a scope-hoisted Vite or Rollup chunk) is reported per bundle under `topLevel`, because no single source owns it.
+
+The JSON report gets a separate `cpu` section; byte rows never contain CPU fields:
+
+- `cpu.minSamples`, `cpu.method`.
+- `cpu.scenarios[]`: `scenario`, `runs`, `samplingIntervalUs`, `environment`, `bundles` (the analyzed bundles these runs loaded), and `windows[]`.
+- `windows[]`: `window`, per-run `durationUs` and total `samples`, `medianDurationUs`, and rows in `sources` (with `package`), `packages`, `topLevel` (by bundle `path`), and `other` (buckets).
+- Every row: `status` (`measured` or `insufficient`), per-run `samples` and `selfUs`, `medianSamples`, and `medianUs`, `q1Us`, `q3Us`. Quartiles interpolate linearly between runs.
+
+A row exists when its functions were sampled in at least one run. A source of a bundle listed in `bundles` with no row in a window was not sampled there: its cost is below what the profiler resolved, not zero. A source whose bundles were not loaded has no CPU value for that scenario.
+
+Buckets in `other`:
+
+| Bucket | Time |
+| --- | --- |
+| `(program)` | Browser work outside JavaScript, such as parsing, style, layout, and paint. Out of scope for source attribution. |
+| `(garbage collector)` | V8 garbage collection. |
+| `(idle)` | The main thread was idle. |
+| `(native)` | Native API calls (DOM methods and other browser APIs) made directly from profiled bundles: scripts under the scenario's `prefix` or `cdnPrefixes`. |
+| `(other scripts)` | Scripts that are not profiled bundles (inline and evaluated code, other origins, Playwright's injected scripts) and the native calls they make. A bundle that V8 discarded before it could be verified also counts here, with a warning. |
+| `(excluded bundles)` | Analyzed bundles left out by filters or by the file selection. |
+
+Markdown lists, per scenario and window, the 20 sources with the largest median self time, each bundle's top level, and the buckets. Selecting a source in the treemap shows its self time for every scenario window whose profile loaded one of its bundles, including `Not sampled`.
+
+### Insufficient values
+
+A row is `insufficient` when its median self samples per run is below 10. Such a value is shown with its samples so it is not mistaken for a cost of zero, but it is not reliable. In the demo, `ReportChart.jsx` renders in the `open-report` action window in microseconds; its median was 0 to 2 samples per run on every machine and condition measured, so it is reported as `insufficient`. `format.js` creates `Intl.NumberFormat` instances during page load and is measured at about 3.9 ms on an Apple M5.
+
 ## How the defaults were chosen
 
 Issue [#24](https://github.com/yceffort/coldpath/issues/24) profiled the demo and the corpus Vite and webpack builds 20 times per scenario on an Apple M5 and on two GitHub-hosted ubuntu runners (Intel Xeon Platinum 8573C and AMD EPYC 9V45, 4 vCPUs each), with `cpuSlowdown` 1 and 4 and sampling intervals of 100 µs and 1 ms.
 
 - **Sampling interval 100 µs.** V8 achieved one sample per 127 to 153 µs on the M5, depending on the session, and per 162 µs on the runners. At 1 ms, no demo source reached 10 samples per run on any machine.
 - **Self time from sample timestamps.** Samples times the window's average interval agreed with timestamps within 2% on the M5 without throttling, but differed by up to 51% on a runner without throttling and by up to 94% with `cpuSlowdown` 4: sampling is irregular on shared VMs and under throttling.
+- **10 samples per run.** Without throttling, sources with 10 or more samples per run varied between runs by a coefficient of variation of 0.02 to 0.08 on the M5 and 0.11 to 0.20 on the runners; below 5 samples it was 0.5 or more.
 - **10 runs.** The median's spread across resamples (relative interquartile range) was about 3% on the M5 and 6 to 8% on the runners with 10 runs, and 3 to 6% on the runners with 20.
 - **CPU throttling is optional.** Profiles use the scenario's `cpuSlowdown`, like coverage. At 4, self time grew about fourfold but samples only 1.7 times on the M5 and 2 times on the runners; run-to-run variation rose on the M5 and stayed about the same on the runners.
 

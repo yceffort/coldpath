@@ -109,6 +109,9 @@ struct Args {
     /// Bundle load causes (from `coldpath snapshot`), keyed by bundle-relative path.
     #[arg(long)]
     loading: Option<PathBuf>,
+    /// CPU profile from `coldpath profile`, bound to bundles by SHA-256. Repeat per scenario.
+    #[arg(long)]
+    profile: Vec<PathBuf>,
     /// Print the import chain and available locations for a graph input or report source.
     #[arg(long)]
     why: Option<String>,
@@ -167,7 +170,7 @@ impl Args {
         ] {
             apply(path)?;
         }
-        for path in &mut self.coverage {
+        for path in self.coverage.iter_mut().chain(&mut self.profile) {
             *path = f(path)?;
         }
         for input in &mut self.inputs {
@@ -369,6 +372,15 @@ fn export(
             .map(Into::into)
         })
         .collect::<Result<_>>()?;
+    // Profiles do not shape the bundle results an excerpt verifies.
+    inv.profile = Vec::new();
+    for path in &args.profile {
+        if excerpt {
+            writer.omit(path, "profile")?;
+        } else {
+            inv.profile.push(writer.input(path, "profile")?.into());
+        }
+    }
     for (path, role, required) in [
         (&mut inv.script_map, "script-map", true),
         (&mut inv.config, "config", true),
@@ -458,6 +470,7 @@ fn main() -> Result<()> {
             || args.html.is_some()
             || args.graph.is_some()
             || args.labels.is_some(),
+        profiles: args.profile.clone(),
         ..Default::default()
     };
     if let Some(selection) = &selection {

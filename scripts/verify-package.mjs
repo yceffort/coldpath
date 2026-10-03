@@ -113,6 +113,10 @@ exec(coldpath, [
   'coldpath.scenarios.json',
   '--graph',
   'dist/assets/coldpath.graph.json',
+  '--profile',
+  'artifacts/coverage/initial.profile.json',
+  '--profile',
+  'artifacts/coverage/interaction.profile.json',
   '--json',
   'artifacts/report.json',
 ])
@@ -122,6 +126,13 @@ assert.equal(report.initialScenario, 'initial')
 assert(report.importPaths.length > 0, 'graph import paths missing')
 assert.equal(report.bundles[0].verification[0].source, 'sha256')
 assert(report.totals.unobservedBytes > 0 && report.totals.unmeasuredBytes === 0)
+assert.deepEqual(
+  report.cpu.scenarios.map((s) => [s.scenario, s.runs, s.windows.map((w) => w.window)]),
+  [
+    ['initial', 2, ['load']],
+    ['interaction', 2, ['load', 'action']],
+  ],
+)
 const analyzeScenarios = ['analyze', '--scenarios', 'coldpath.scenarios.json', '--json', 'artifacts/ordered.json']
 exec(coldpath, [...analyzeScenarios, '--scenario-order', 'initial,interaction'])
 assert.deepEqual(JSON.parse(await readFile(join(project, 'artifacts/ordered.json'), 'utf8')).scenarios, ['initial', 'interaction'])
@@ -131,5 +142,5 @@ assert.throws(
   (error) => error.stderr.includes('received ["initial", "missing"], recorded ["initial", "interaction"]'),
 )
 console.log(
-  'Verified a fresh install: @yceffort/coldpath/rollup, coldpath graph, coldpath collect --scenarios, coldpath profile --scenarios, and coldpath analyze --scenarios with and without --scenario-order.',
+  'Verified a fresh install: @yceffort/coldpath/rollup, coldpath graph, coldpath collect --scenarios, coldpath profile --scenarios, and coldpath analyze --scenarios with profiles and with and without --scenario-order.',
 )

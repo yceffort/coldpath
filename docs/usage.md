@@ -138,7 +138,7 @@ Inspector HTML stores details by chunk and decodes them on demand. Blocks larger
 
 ### Evidence export and replay
 
-`--export DIRECTORY` writes a portable copy of one analysis next to its normal outputs. The directory must be new or empty. It holds the raw coverage recordings, every bundle the analysis read (including ones excluded by filters), the maps it used, the graph, metafile, label, loading, script-map, and config files it was given, any source file the graph check read from disk, and `manifest.json`.
+`--export DIRECTORY` writes a portable copy of one analysis next to its normal outputs. The directory must be new or empty. It holds the raw coverage recordings, every bundle the analysis read (including ones excluded by filters), the maps it used, the graph, metafile, label, loading, profile, script-map, and config files it was given, any source file the graph check read from disk, and `manifest.json`.
 
 ```sh
 coldpath analyze --dir artifacts/site/files --url-prefix https:// \
@@ -157,9 +157,13 @@ Files are copied byte for byte, so V8 function counts, URLs, and `sourcesContent
 
 `--export-select BUNDLE_OR_SOURCE` (repeatable, with `--export`) writes manifest `kind: "excerpt"` instead of `full`. A value selects the bundle with that bundle-relative path, or every bundle containing a report source with that name; a value that matches nothing, or only an excluded bundle, is an error. Selected bundles and their maps are copied whole, because span digests cover the whole bundle, so a module selection still ships its bundle.
 
-Coverage recordings are filtered to the entries of the selected scripts, since Playwright and DevTools recordings embed each script's full text. Kept entries retain their offsets, counts, and source text, so every position still refers to the unmodified selected script; JSON formatting and key order are not preserved. `excerpt.derived` lists each filtered recording with the original file's SHA-256 and the number of removed entries. Script-map and config files are copied. Graph, metafile, label, and loading files do not shape the verified bundle results and are left out.
+Coverage recordings are filtered to the entries of the selected scripts, since Playwright and DevTools recordings embed each script's full text. Kept entries retain their offsets, counts, and source text, so every position still refers to the unmodified selected script; JSON formatting and key order are not preserved. `excerpt.derived` lists each filtered recording with the original file's SHA-256 and the number of removed entries. Script-map and config files are copied. Graph, metafile, label, loading, and profile files do not shape the verified bundle results and are left out.
 
 `excerpt.omitted` lists every input left out with its role and SHA-256 from the full analysis: located files by the `tree/` path a full export would use, other inputs by file name. `excerpt.fullAnalysis` records the full analysis totals, per-scenario totals, excluded bundles, and bundle count with `reproducible: false`; replay does not check them. For an excerpt, `expected` holds only the scenario order and the selected bundles, and replay verifies input hashes plus those bundles' hashes, verification, counts, and span digests. It exits `4` on success and never reports an excerpt as a complete reproduction.
+
+### CPU self time
+
+`--profile FILE` (repeatable) joins CPU profiles from `coldpath profile`. Each binds to an analyzed bundle by path and SHA-256, like a coverage envelope. The JSON report adds a separate `cpu` section with per-source, per-package, per-bundle top-level, and bucket self time for each scenario window, as per-run values with medians, quartiles, sample counts, and `measured` or `insufficient`. Markdown and the treemap source detail show the same values. Without `--profile` the output is unchanged. See [CPU cost](cpu.md).
 
 ### Labels and load causes
 

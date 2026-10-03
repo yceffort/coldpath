@@ -16,6 +16,7 @@ See which JavaScript runs initially, which runs only during interactions, and wh
 - Accept files/globs and export HTML, JSON, TSV, and Markdown; enforce byte budgets in CI.
 - Trace import chains and available locations from esbuild, webpack, Rollup/Vite, and Next.js Turbopack graphs.
 - Review suggested loading boundaries with explicitly estimated source gzip/Brotli sizes.
+- Measure per-source CPU self time from repeated Chromium profiles, with sample counts and spread.
 
 Early-stage software: the CLI and JSON schema may change. Unobserved bytes are code that did not run during the supplied scenarios; they are not automatically safe to delete.
 
@@ -258,6 +259,20 @@ coldpath collect \
 ```
 
 For Next.js, use the build's static output directory with `--prefix /_next/static/`. The collector accepts a local action module for clicks, searches, and other interactions. See [collecting coverage](docs/collecting.md) for the action API, capture scope, and source-map limitations.
+
+## Measure CPU cost
+
+`coldpath profile` records repeated CPU profiles of the scenarios in a scenario file, with only the profiler running, and `--profile` joins them to the same sources:
+
+```sh
+coldpath profile --scenarios coldpath.scenarios.json
+coldpath analyze --scenarios coldpath.scenarios.json \
+  --profile artifacts/coverage/initial.profile.json \
+  --profile artifacts/coverage/open-report.profile.json \
+  --markdown artifacts/summary.md --treemap artifacts/report.html
+```
+
+Each source gets its self time in each scenario's page-load and action windows: the median and quartiles over 10 runs, with its sample count. Below 10 samples per run a value is marked insufficient, never shown as cheap. See [CPU cost](docs/cpu.md) for attribution rules, the JSON fields, and the measurements behind these defaults.
 
 ## Analyze a site you do not build
 
