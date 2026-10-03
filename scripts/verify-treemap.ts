@@ -79,6 +79,17 @@ try {
   await page.getByRole('button', {name: 'components', exact: true}).click()
   assert.equal(await page.locator('#rows tr').count(), 15)
   assert.equal(await page.locator(top).count(), 15, 'small files must remain reachable')
+  // A tile's numbers appear in a card when it is pointed at or focused, not in a native tooltip.
+  assert.equal(await page.locator('.tile[title]').count(), 0)
+  await page.locator(top).first().hover()
+  assert.match(
+    (await page.locator('#tile-card').textContent())!,
+    /^file00\.tssrc\/components\/file00\.ts2 B.*Observed2 BSelect to see details$/,
+  )
+  await page.mouse.move(0, 0)
+  assert.equal(await page.locator('#tile-card').count(), 0)
+  await page.locator(top).last().focus()
+  assert.match((await page.locator('#tile-card').textContent())!, /^file\d\d\.ts/)
   await page.getByRole('button', {name: 'file00.ts', exact: true}).focus()
   await page.keyboard.press('Enter')
   assert.match((await page.locator('#file').textContent())!, /src\/components\/file00.ts/)
@@ -114,6 +125,22 @@ try {
   await page.screenshot({path: join(output, 'mobile.png'), fullPage: true})
   await page.emulateMedia({colorScheme: 'dark'})
   await page.screenshot({path: join(output, 'dark.png'), fullPage: true})
+  // On a touch screen, which has no hover, the first tap shows the card and the second one zooms.
+  const touch = await browser.newPage({viewport: {width: 390, height: 844}, hasTouch: true})
+  touch.on('pageerror', (error) => errors.push(error.message))
+  await touch.goto(pathToFileURL(html).href)
+  await touch
+    .locator(top)
+    .first()
+    .tap({position: {x: 16, y: 10}})
+  assert.equal(await touch.locator('#scope').textContent(), 'All bundles')
+  assert.match((await touch.locator('#tile-card').textContent())!, /^app\.js.*Tap again to zoom in$/)
+  await touch
+    .locator(top)
+    .first()
+    .tap({position: {x: 16, y: 10}})
+  assert.equal(await touch.locator('#scope').textContent(), 'app.js')
+  await touch.close()
 
   // One source shipped in two bundles: JSON counts the copies, and the treemap lists the extra bytes.
   const shared = join(output, 'shared')
@@ -150,7 +177,7 @@ try {
   assert.deepEqual(errors, [])
   assert.deepEqual(requests, [])
   console.log(
-    'Verified offline nested zoomable treemap, all 15 small entries, exact area totals, coverage states, keyboard navigation, search, package grouping, mapped filter, mobile layout and hostile source names.',
+    'Verified offline nested zoomable treemap, all 15 small entries, exact area totals, coverage states, keyboard navigation, tile cards on hover, focus and touch, search, package grouping, mapped filter, mobile layout and hostile source names.',
   )
 } finally {
   await browser.close()

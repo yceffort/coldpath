@@ -10,6 +10,7 @@ import {shared} from './styles.ts'
 import {Treemap} from './Treemap.tsx'
 
 type ColorMode = 'coverage' | 'phases' | 'initial' | 'changes'
+export type Segment = [bytes: number, color: string, label: string]
 
 export function App({report}: {report: Report}) {
   const [search, setSearch] = useState('')
@@ -64,36 +65,47 @@ export function App({report}: {report: Report}) {
   const phases = color === 'phases' && report.scenarios.length > 0
   const initialView = color === 'initial' && Boolean(initial)
   const changing = color === 'changes' && Boolean(changes)
-  function tileColor(row: View) {
+  // What a tile's color shows, in the legend's words: [bytes, color, label] from the start of the tile's fill.
+  function segments(row: View): Segment[] {
     if (changing) {
-      return row.growingSources || (row.change?.delta.bytes ?? 0) > 0
-        ? 'var(--growth)'
-        : row.shrinkingSources || (row.change?.delta.bytes ?? 0) < 0
-          ? 'var(--reduction)'
-          : 'var(--unmeasured)'
+      const [color, label] =
+        row.growingSources || (row.change?.delta.bytes ?? 0) > 0
+          ? ['var(--growth)', 'Growth']
+          : row.shrinkingSources || (row.change?.delta.bytes ?? 0) < 0
+            ? ['var(--reduction)', 'Reduction']
+            : ['var(--unmeasured)', 'Unchanged']
+      return [[row.bytes, color, label]]
     }
-    if (phases || initialView) {
-      let offset = 0
-      const stops: [number, string][] = phases
-        ? [...row.first.map((value, index): [number, string] => [value, phaseColor(index)]), [row.earlierUnknown, 'var(--unknown-initial)']]
-        : [
-            [row.initialObserved, 'var(--observed)'],
-            [row.interactionOnly, 'var(--interaction)'],
-            [row.initialUnknown, 'var(--unknown-initial)'],
-          ]
-      stops.push([row.unobservedBytes, 'var(--unobserved)'], [row.unmeasuredBytes, 'var(--unmeasured)'])
-      return `linear-gradient(90deg,${stops
-        .map(([value, color]) => {
-          const start = offset
-          offset += (value / (row.bytes || 1)) * 100
-          return `${color} ${start}% ${offset}%`
-        })
-        .join(',')})`
-    }
-    const total = row.bytes || 1,
-      observed = (row.observedBytes / total) * 100,
-      unobserved = ((row.observedBytes + row.unobservedBytes) / total) * 100
-    return `linear-gradient(90deg,var(--observed) 0% ${observed}%,var(--unobserved) ${observed}% ${unobserved}%,var(--unmeasured) ${unobserved}% 100%)`
+    const rest: Segment[] = [
+      [row.unobservedBytes, 'var(--unobserved)', phases || initialView ? 'No observed execution' : 'Unobserved'],
+      [row.unmeasuredBytes, 'var(--unmeasured)', 'Unmeasured'],
+    ]
+    if (phases)
+      return [
+        ...row.first.map((value, index): Segment => [value, phaseColor(index), 'First observed: ' + report.scenarios[index]]),
+        [row.earlierUnknown, 'var(--unknown-initial)', 'Observed · earlier scenarios unmeasured'],
+        ...rest,
+      ]
+    if (initialView)
+      return [
+        [row.initialObserved, 'var(--observed)', 'Initial executed'],
+        [row.interactionOnly, 'var(--interaction)', 'Interaction only'],
+        [row.initialUnknown, 'var(--unknown-initial)', 'Later executed · initial unmeasured'],
+        ...rest,
+      ]
+    return [[row.observedBytes, 'var(--observed)', 'Observed'], ...rest]
+  }
+  function tileColor(row: View) {
+    const parts = segments(row)
+    if (changing) return parts[0][1]
+    let offset = 0
+    return `linear-gradient(90deg,${parts
+      .map(([value, color]) => {
+        const start = offset
+        offset += (value / (row.bytes || 1)) * 100
+        return `${color} ${start}% ${offset}%`
+      })
+      .join(',')})`
   }
   function tooltip(row: View) {
     return (
@@ -353,7 +365,8 @@ export function App({report}: {report: Report}) {
               : ''}
         </p>
         <p id="treemap-note" hidden={treemapHidden} {...stylex.props(shared.note)}>
-          Tile area is generated size. Select a box to zoom in; use the path above or the browser's back button to zoom out.
+          Tile area is generated size. Point at or focus a tile to see its numbers, and select it to zoom in; on a touch screen, tap once
+          for the numbers and again to zoom. Use the path above or the browser's back button to zoom out.
         </p>
         <Treemap
           items={items}
@@ -362,7 +375,7 @@ export function App({report}: {report: Report}) {
           zoom={location.zoom}
           changing={changing}
           color={tileColor}
-          tooltip={tooltip}
+          segments={segments}
           onSelect={select}
         />
         <div id="file" hidden={!fileShown} {...stylex.props(styles.file)}>
