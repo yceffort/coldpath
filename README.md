@@ -16,7 +16,7 @@ See which JavaScript runs initially, which runs only during interactions, and wh
 - Accept files/globs and export HTML, JSON, TSV, and Markdown; enforce byte budgets in CI.
 - Trace import chains and available locations from esbuild, webpack, Rollup/Vite, and Next.js Turbopack graphs.
 - Review suggested loading boundaries with explicitly estimated source gzip/Brotli sizes.
-- Measure per-source CPU self time from repeated Chromium profiles, with sample counts and spread.
+- Measure per-source CPU self time from repeated Chromium profiles, with sample counts and spread, and compare it with a baseline.
 
 Early-stage software: the CLI and JSON schema may change. Unobserved bytes are code that did not run during the supplied scenarios; they are not automatically safe to delete.
 
@@ -272,7 +272,7 @@ coldpath analyze --scenarios coldpath.scenarios.json \
   --markdown artifacts/summary.md --treemap artifacts/report.html
 ```
 
-Each source gets its self time in each scenario's page-load and action windows: the median and quartiles over 10 runs, with its sample count. Below 10 samples per run a value is marked insufficient, never shown as cheap. See [CPU cost](docs/cpu.md) for attribution rules, the JSON fields, and the measurements behind these defaults.
+Each source gets its self time in each scenario's page-load and action windows: the median and quartiles over 10 runs, with its sample count. Below 10 samples per run a value is marked insufficient, never shown as cheap. With `--baseline`, a source is reported as regressed only when a rank test across runs is significant and the shift is at least 25%; profile both builds on one machine. See [CPU cost](docs/cpu.md) for attribution rules, the JSON fields, and the measurements behind these defaults.
 
 ## Analyze a site you do not build
 
@@ -330,6 +330,8 @@ steps:
 ```
 
 `args` takes one argument per line and must not include output options. Use `baseline` instead of `base-directory` to pass a report you already have, for example one downloaded from the base branch's last run. The comment is found by a marker and must be written by a bot account (the default `GITHUB_TOKEN` is). Pull requests from forks get a read-only token, so the comment step only warns there; the artifact is still uploaded. The runner needs Rust (`cargo`). [`pr-report.yml`](.github/workflows/pr-report.yml) runs the action on this repository's recorded example.
+
+The comment includes CPU changes when `args` lists `--profile` files and both builds were profiled in the same job. Profiles from another runner, such as those in a downloaded `baseline`, are reported as inconclusive: two runners measured the same build 22 to 32% apart. See [CPU cost in CI](docs/cpu.md#in-ci).
 
 ## Development
 

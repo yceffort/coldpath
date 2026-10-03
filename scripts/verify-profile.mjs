@@ -1,4 +1,4 @@
-// Real Chromium CPU profiles through `coldpath profile`, joined into the report.
+// Real Chromium CPU profiles through `coldpath profile`, joined into the report and compared with a baseline.
 import assert from 'node:assert/strict'
 import {execFile, execFileSync} from 'node:child_process'
 import {createHash} from 'node:crypto'
@@ -9,6 +9,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url'
 import {promisify} from 'node:util'
 
 import {chromium} from '@playwright/test'
+import {build as esbuild} from 'esbuild'
 import {build as vite} from 'vite'
 
 import {DEFAULT_RUNS, SAMPLING_INTERVAL_US} from '../lib/profile.mjs'
@@ -205,6 +206,96 @@ try {
   await new Promise((done) => pages.close(done))
 }
 
+// A controlled regression: a busy loop added to a function that only runs after a click. The source
+// file keeps its path, so both builds' maps name the same source.
+const regression = join(work, 'regression')
+await mkdir(join(regression, 'src'), {recursive: true})
+await writeFile(
+  join(regression, 'src', 'app.js'),
+  `import {report} from './report.js'
+document.querySelector('button').addEventListener('click', () => {
+  document.querySelector('output').textContent = 'report ' + report(2000000)
+})
+`,
+)
+const reportSource = (busy) => `export function report(size) {
+  let x = 0
+  for (let i = 0; i < size; i++) x = (x * 31 + i) % 1000003
+${busy ? '  for (let i = 0; i < size; i++) x = (x * 17 + i) % 1000033\n' : ''}  return x
+}
+`
+for (const [name, busy] of [
+  ['base', false],
+  ['regressed', true],
+]) {
+  await writeFile(join(regression, 'src', 'report.js'), reportSource(busy))
+  await esbuild({
+    absWorkingDir: regression,
+    entryPoints: ['src/app.js'],
+    bundle: true,
+    minify: true,
+    sourcemap: true,
+    format: 'esm',
+    outdir: join(regression, name),
+  })
+  await writeFile(
+    join(regression, name, 'index.html'),
+    '<!doctype html><meta charset="utf-8"><button>Open report</button><output></output><script type="module" src="/app.js"></script>',
+  )
+}
+await writeFile(
+  join(regression, 'open-report.mjs'),
+  `export default async function ({page}) {
+  await page.getByRole('button', {name: 'Open report'}).click()
+  await page.getByText(/^report \\d+$/).waitFor()
+}\n`,
+)
+for (const [build, out] of [
+  ['base', 'base-out'],
+  ['regressed', 'regressed-out'],
+  ['base', 'again-out'],
+]) {
+  const server = await serve(join(regression, build))
+  try {
+    await scenarios(`regression/${out}.scenarios.json`, {
+      url: server.origin + '/',
+      dir: build,
+      waitMs: 0,
+      out,
+      scenarios: [{name: 'open-report', actions: 'open-report.mjs'}],
+    })
+    await coldpath('profile', '--scenarios', `regression/${out}.scenarios.json`)
+  } finally {
+    await server.close()
+  }
+}
+const analyze = (build, out, ...args) =>
+  coldpath(
+    '--dir',
+    `regression/${build}`,
+    '--profile',
+    `regression/${out}/open-report.profile.json`,
+    '--json',
+    `regression/${out}.json`,
+    ...args,
+  )
+await analyze('base', 'base-out')
+const base = await read('regression/base-out.json')
+const reportRow = (cpu) =>
+  cpu.scenarios[0].windows.find((w) => w.window === 'action').sources.find((row) => row.source.endsWith('src/report.js'))
+assert.equal(reportRow(base.cpu).status, 'measured', 'the later-only function is measurable before the regression')
+await analyze('regressed', 'regressed-out', '--baseline', 'regression/base-out.json', '--markdown', 'regression/regressed.md')
+const regressed = (await read('regression/regressed-out.json')).baseline.cpu
+const change = regressed.sources.find((row) => row.window === 'action' && row.source.endsWith('src/report.js'))
+assert.equal(change.change, 'regressed', JSON.stringify(change))
+assert(change.relativeShift >= 0.25 && change.adjustedPValue < 0.05)
+assert.match(await readFile(join(regression, 'regressed.md'), 'utf8'), /\| open-report \| action \| \.\.\/src\/report\.js \| regressed \|/)
+await analyze('base', 'again-out', '--baseline', 'regression/base-out.json')
+const again = (await read('regression/again-out.json')).baseline.cpu
+assert(
+  again.sources.every((row) => !['regressed', 'improved'].includes(row.change)),
+  JSON.stringify(again.sources.filter((row) => ['regressed', 'improved'].includes(row.change))),
+)
 console.log(
-  `Verified ${DEFAULT_RUNS}-run demo profiles at ${SAMPLING_INTERVAL_US} µs with load and action windows, stale-build, multi-document and run-count rejection, the worker warning, and CPU rows in JSON, Markdown and the treemap.`,
+  `Verified ${DEFAULT_RUNS}-run demo profiles at ${SAMPLING_INTERVAL_US} µs with load and action windows, stale-build, multi-document and run-count rejection, the worker warning, CPU rows in JSON, Markdown and the treemap, and a controlled regression (report.js +${Math.round(change.relativeShift * 100)}%) against an unchanged rerun.`,
 )
