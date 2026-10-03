@@ -1,6 +1,9 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["@stylexjs/eslint-plugin"],
   "rules": {
-    "no-unused-vars": ["warn", {"ignoreRestSiblings": true}]
+    "no-unused-vars": ["warn", {"ignoreRestSiblings": true}],
+    "@stylexjs/valid-styles": "error",
+    "@stylexjs/valid-shorthands": "error"
   }
 }

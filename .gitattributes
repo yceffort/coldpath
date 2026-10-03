@@ -2,3 +2,5 @@
 # The recorded coverage contains hashes of these exact bytes.
 examples/recorded/entry.js -text
 examples/recorded/entry.js.map -text
+# Built from ui/ by pnpm build:ui.
+src/ui/*.html linguist-generated=true

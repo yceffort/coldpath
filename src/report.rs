@@ -162,7 +162,7 @@ pub fn html(report: &Report) -> Result<String> {
             })?,
         )?);
     }
-    Ok(include_str!("report.html").replacen("__COLDPATH_PAYLOADS__", &payloads, 1))
+    Ok(include_str!("ui/report.html").replacen("__COLDPATH_PAYLOADS__", &payloads, 1))
 }
 
 /// A compact size/coverage explorer: no code or interval payload is necessary.
@@ -225,7 +225,7 @@ pub fn treemap_with_inspector(report: &Report, include_inspector: bool) -> Resul
     })?;
     // Summary payloads are small. Escaped JSON avoids compression/decode costs.
     let payload = escaped_json(&json);
-    Ok(include_str!("treemap.html").replacen("__COLDPATH_DATA__", &payload, 1))
+    Ok(include_str!("ui/treemap.html").replacen("__COLDPATH_DATA__", &payload, 1))
 }
 
 pub fn tsv(report: &Report) -> String {

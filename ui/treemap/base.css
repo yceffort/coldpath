@@ -1,0 +1,117 @@
+/* Theme tokens, a reset, and element defaults. Component styles live with their components (StyleX). */
+/* Temperature carries meaning: warm hues are code that ran (one per scenario), ice is code that never ran. */
+:root {
+  color-scheme: light dark;
+  --bg: #eef1f4;
+  --panel: #fff;
+  --raised: #f6f8fa;
+  --text: #16202a;
+  --muted: #56636f;
+  --border: #d3dae1;
+  --accent: #1b4fb8;
+  --focus: #c2410c;
+  --observed: #f08a5d;
+  --interaction: #f2b84b;
+  --phase-2: #e56b98;
+  --phase-3: #b58be0;
+  --unobserved: #b3d4ee;
+  --unmeasured: #e2e6eb;
+  --unknown-initial: #cfc27a;
+  --growth: #ec9a9a;
+  --reduction: #9fd5c3;
+  --ran: #e0673a;
+  --never: #7fb3dc;
+  --chip: rgb(255 255 255 / 0.9);
+  --edge: rgb(22 32 42 / 0.16);
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1318;
+    --panel: #151c23;
+    --raised: #1b242d;
+    --text: #e7edf2;
+    --muted: #97a4b0;
+    --border: #2c3844;
+    --accent: #8fb4ff;
+    --focus: #fb923c;
+    --observed: #b9552d;
+    --interaction: #a37a22;
+    --phase-2: #a33c66;
+    --phase-3: #6f4f9e;
+    --unobserved: #25435d;
+    --unmeasured: #29313a;
+    --unknown-initial: #6b6330;
+    --growth: #7a3838;
+    --reduction: #2a5d4f;
+    --ran: #f0875a;
+    --never: #4f86b4;
+    --chip: rgb(21 28 35 / 0.88);
+    --edge: rgb(231 237 242 / 0.14);
+  }
+}
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    15px/1.55 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+h2 {
+  font-size: 17px;
+  line-height: 1.3;
+  margin: 0;
+}
+p {
+  margin: 8px 0;
+}
+small {
+  color: var(--muted);
+}
+button,
+input,
+select {
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 11px;
+  background: var(--panel);
+  color: inherit;
+}
+button,
+select,
+summary,
+label {
+  cursor: pointer;
+}
+select:hover,
+input[type='search']:hover {
+  border-color: var(--muted);
+}
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+/* StyleX has no name for Safari's summary marker. */
+#actions > summary::-webkit-details-marker {
+  display: none;
+}
+label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}

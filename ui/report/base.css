@@ -1,0 +1,185 @@
+/* Theme tokens, a reset, and element defaults. Component styles live with their components (StyleX). */
+:root {
+  color-scheme: light;
+  --bg: #f5f7fa;
+  --panel: #fff;
+  --border: #dce2e9;
+  --muted: #5f6d7c;
+  --text: #202c3a;
+  --observed: #176849;
+  --unobserved: #99411b;
+  --unmeasured: #536583;
+  --subtle: #f6f8fb;
+  --hover: #edf2f7;
+  --selected: #e8edff;
+  --selection: #3e57bd;
+  --code: #f8fafc;
+  --tile-observed: #c1e2d4;
+  --tile-unobserved: #f0d2bf;
+  --tile-unmeasured: #dce3ef;
+  --mark-observed: #deeee5;
+  --mark-unobserved: #f5e3d8;
+  --mark-unmeasured: #e1e7f1;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #11161d;
+  --panel: #182029;
+  --border: #2b3542;
+  --muted: #a2afbf;
+  --text: #ecf0f5;
+  --observed: #85d7b9;
+  --unobserved: #edac8f;
+  --unmeasured: #a6b4cf;
+  --subtle: #111820;
+  --hover: #253240;
+  --selected: #273250;
+  --selection: #a3b5ff;
+  --code: #0f161e;
+  --tile-observed: #2c4b42;
+  --tile-unobserved: #593b31;
+  --tile-unmeasured: #343e50;
+  --mark-observed: #19372e;
+  --mark-unobserved: #503127;
+  --mark-unmeasured: #2f3546;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #11161d;
+    --panel: #182029;
+    --border: #2b3542;
+    --muted: #a2afbf;
+    --text: #ecf0f5;
+    --observed: #85d7b9;
+    --unobserved: #edac8f;
+    --unmeasured: #a6b4cf;
+    --subtle: #111820;
+    --hover: #253240;
+    --selected: #273250;
+    --selection: #a3b5ff;
+    --code: #0f161e;
+    --tile-observed: #2c4b42;
+    --tile-unobserved: #593b31;
+    --tile-unmeasured: #343e50;
+    --mark-observed: #19372e;
+    --mark-unobserved: #503127;
+    --mark-unmeasured: #2f3546;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font:
+    14px/1.65 system-ui,
+    sans-serif;
+}
+h1 {
+  margin: 8px 0 0;
+  font-size: 32px;
+  font-weight: 650;
+  letter-spacing: -1px;
+}
+h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+p {
+  margin: 0;
+}
+small {
+  color: var(--muted);
+}
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--border);
+  background: var(--subtle);
+  border-radius: 7px;
+  padding: 8px 12px;
+}
+button {
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--hover);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--selection);
+  outline-offset: 3px;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+button[aria-pressed='true'] {
+  color: var(--selection);
+  background: var(--selected);
+  border-color: var(--border);
+}
+select {
+  font-size: 12px;
+  padding: 9px 10px;
+}
+details {
+  overflow-wrap: anywhere;
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 12px 0;
+}
+/* Coverage states, shared by text in every component. */
+.muted {
+  color: var(--muted);
+}
+.observed {
+  color: var(--observed);
+}
+.unobserved {
+  color: var(--unobserved);
+}
+.unmeasured {
+  color: var(--unmeasured);
+}
+@media (max-width: 600px) {
+  h1 {
+    font-size: 26px;
+  }
+}
+/* StyleX makes each property's media queries exclusive with "not (print)", which no browser accepts, so printing is styled here. */
+@media print {
+  body {
+    color: #111;
+    background: white;
+  }
+  #summary > div,
+  #explorer,
+  #inspector,
+  main > section:last-of-type {
+    background: white !important;
+  }
+  #inspector {
+    position: static !important;
+  }
+  #original-code,
+  #generated {
+    height: auto !important;
+    max-height: none !important;
+  }
+}

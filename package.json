@@ -23,15 +23,17 @@
   "scripts": {
     "build": "cargo build --locked --release",
     "build:js": "node -e \"fs.rmSync('build', {recursive: true, force: true})\" && tsc -p tsconfig.build.json",
+    "build:ui": "node ui/build.ts",
+    "dev:ui": "vite -c ui/vite.config.ts",
     "prepack": "node --run build:js",
     "test": "cargo test --locked && pnpm test:browser && pnpm test:corpus && pnpm test:package",
     "test:corpus": "node --run build:js && node scripts/verify-label-score.ts && node scripts/verify-graphs.ts && node scripts/verify-corpus.ts && node scripts/verify-recovery.ts",
     "test:browser": "node --run build:js && node scripts/verify.ts && node scripts/verify-formats.ts && node scripts/verify-collector.ts && node scripts/verify-environment.ts && node scripts/verify-flows.ts && node scripts/verify-treemap.ts && node scripts/verify-comparison.ts && node scripts/verify-inferred.ts && node scripts/verify-profile.ts",
     "collect": "node bin/coldpath.ts collect",
     "test:package": "node scripts/verify-package.ts",
-    "lint": "oxlint --deny-warnings bin lib scripts benchmarks examples/demo && oxfmt --check bin lib scripts benchmarks/*.ts examples/demo",
-    "typecheck": "tsc -p tsconfig.json",
-    "format": "oxfmt bin lib scripts benchmarks/*.ts examples/demo"
+    "lint": "oxlint --deny-warnings bin lib scripts benchmarks ui examples/demo && oxfmt --check bin lib scripts benchmarks/*.ts ui examples/demo",
+    "typecheck": "tsc -p tsconfig.json && tsc -p ui/tsconfig.json",
+    "format": "oxfmt bin lib scripts benchmarks/*.ts ui examples/demo"
   },
   "dependencies": {
     "@babel/parser": "7.29.9"
@@ -52,11 +54,17 @@
     "@anthropic-ai/sdk": "0.131.0",
     "@jridgewell/trace-mapping": "0.3.31",
     "@playwright/test": "1.63.0",
+    "@stylexjs/eslint-plugin": "0.19.1",
+    "@stylexjs/stylex": "0.19.1",
+    "@stylexjs/unplugin": "0.19.1",
     "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "esbuild": "0.28.2",
     "next": "16.3.8",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",
+    "preact": "11.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "rollup": "4.64.0",

@@ -68,6 +68,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      # The analyzer embeds the committed report pages, so they must match a fresh build of ui/.
+      - run: pnpm build:ui && git diff --exit-code -- src/ui
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:browser
       - run: pnpm test:corpus

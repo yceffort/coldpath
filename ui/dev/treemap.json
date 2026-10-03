@@ -1,0 +1,363 @@
+{
+  "schemaVersion": 3,
+  "totals": {
+    "bytes": 293,
+    "observedBytes": 208,
+    "unobservedBytes": 85,
+    "unmeasuredBytes": 0
+  },
+  "scenarios": ["initial", "interaction-delta"],
+  "initialScenario": "initial",
+  "scenarioReports": [
+    {
+      "scenario": "initial",
+      "totals": {
+        "bytes": 293,
+        "observedBytes": 177,
+        "unobservedBytes": 116,
+        "unmeasuredBytes": 0
+      },
+      "bundles": [
+        {
+          "path": "entry.js",
+          "sources": [
+            {
+              "source": "../../fixtures/feature.js",
+              "package": "[application]",
+              "bytes": 137,
+              "observedBytes": 21,
+              "unobservedBytes": 116,
+              "unmeasuredBytes": 0
+            },
+            {
+              "source": "../../fixtures/startup.js",
+              "package": "[application]",
+              "bytes": 59,
+              "observedBytes": 59,
+              "unobservedBytes": 0,
+              "unmeasuredBytes": 0
+            },
+            {
+              "source": "../../fixtures/entry.js",
+              "package": "[application]",
+              "bytes": 56,
+              "observedBytes": 56,
+              "unobservedBytes": 0,
+              "unmeasuredBytes": 0
+            },
+            {
+              "source": "[unmapped]",
+              "package": "[unmapped]",
+              "bytes": 41,
+              "observedBytes": 41,
+              "unobservedBytes": 0,
+              "unmeasuredBytes": 0
+            }
+          ],
+          "bytes": 293,
+          "observedBytes": 177,
+          "unobservedBytes": 116,
+          "unmeasuredBytes": 0
+        }
+      ],
+      "sources": [
+        {
+          "source": "../../fixtures/feature.js",
+          "package": "[application]",
+          "bytes": 137,
+          "observedBytes": 21,
+          "unobservedBytes": 116,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "../../fixtures/startup.js",
+          "package": "[application]",
+          "bytes": 59,
+          "observedBytes": 59,
+          "unobservedBytes": 0,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "../../fixtures/entry.js",
+          "package": "[application]",
+          "bytes": 56,
+          "observedBytes": 56,
+          "unobservedBytes": 0,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "[unmapped]",
+          "package": "[unmapped]",
+          "bytes": 41,
+          "observedBytes": 41,
+          "unobservedBytes": 0,
+          "unmeasuredBytes": 0
+        }
+      ],
+      "packages": [
+        {
+          "package": "[application]",
+          "bytes": 252,
+          "observedBytes": 136,
+          "unobservedBytes": 116,
+          "unmeasuredBytes": 0
+        },
+        {
+          "package": "[unmapped]",
+          "bytes": 41,
+          "observedBytes": 41,
+          "unobservedBytes": 0,
+          "unmeasuredBytes": 0
+        }
+      ],
+      "interactionCandidates": []
+    },
+    {
+      "scenario": "interaction-delta",
+      "totals": {
+        "bytes": 293,
+        "observedBytes": 31,
+        "unobservedBytes": 262,
+        "unmeasuredBytes": 0
+      },
+      "bundles": [
+        {
+          "path": "entry.js",
+          "sources": [
+            {
+              "source": "../../fixtures/feature.js",
+              "package": "[application]",
+              "bytes": 137,
+              "observedBytes": 31,
+              "unobservedBytes": 106,
+              "unmeasuredBytes": 0
+            },
+            {
+              "source": "../../fixtures/startup.js",
+              "package": "[application]",
+              "bytes": 59,
+              "observedBytes": 0,
+              "unobservedBytes": 59,
+              "unmeasuredBytes": 0
+            },
+            {
+              "source": "../../fixtures/entry.js",
+              "package": "[application]",
+              "bytes": 56,
+              "observedBytes": 0,
+              "unobservedBytes": 56,
+              "unmeasuredBytes": 0
+            },
+            {
+              "source": "[unmapped]",
+              "package": "[unmapped]",
+              "bytes": 41,
+              "observedBytes": 0,
+              "unobservedBytes": 41,
+              "unmeasuredBytes": 0
+            }
+          ],
+          "bytes": 293,
+          "observedBytes": 31,
+          "unobservedBytes": 262,
+          "unmeasuredBytes": 0
+        }
+      ],
+      "sources": [
+        {
+          "source": "../../fixtures/feature.js",
+          "package": "[application]",
+          "bytes": 137,
+          "observedBytes": 31,
+          "unobservedBytes": 106,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "../../fixtures/startup.js",
+          "package": "[application]",
+          "bytes": 59,
+          "observedBytes": 0,
+          "unobservedBytes": 59,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "../../fixtures/entry.js",
+          "package": "[application]",
+          "bytes": 56,
+          "observedBytes": 0,
+          "unobservedBytes": 56,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "[unmapped]",
+          "package": "[unmapped]",
+          "bytes": 41,
+          "observedBytes": 0,
+          "unobservedBytes": 41,
+          "unmeasuredBytes": 0
+        }
+      ],
+      "packages": [
+        {
+          "package": "[application]",
+          "bytes": 252,
+          "observedBytes": 31,
+          "unobservedBytes": 221,
+          "unmeasuredBytes": 0
+        },
+        {
+          "package": "[unmapped]",
+          "bytes": 41,
+          "observedBytes": 0,
+          "unobservedBytes": 41,
+          "unmeasuredBytes": 0
+        }
+      ],
+      "interactionCandidates": [
+        {
+          "source": "../../fixtures/feature.js",
+          "package": "[application]",
+          "interactionOnlyBytes": 31,
+          "initialUnmeasuredObservedBytes": 0,
+          "estimatedDeferrableCompression": {
+            "gzipBytes": 52,
+            "brotliBytes": 35
+          }
+        }
+      ]
+    }
+  ],
+  "baseline": null,
+  "importPaths": null,
+  "recommendations": [
+    {
+      "kind": "inspect-imports",
+      "source": "../../fixtures/feature.js",
+      "scenario": "interaction-delta",
+      "bytes": 31,
+      "estimatedCompression": {
+        "gzipBytes": 52,
+        "brotliBytes": 35
+      },
+      "importPath": null,
+      "initialObservedBytes": 21,
+      "initialTopLevelOnly": false,
+      "explanation": "These measured bytes execute in this interaction but not initially. Inspect the import graph and side effects before choosing a lazy-loading boundary."
+    }
+  ],
+  "warnings": [],
+  "excludedBundles": [],
+  "budgetFailures": [],
+  "compression": null,
+  "duplicateSources": [],
+  "bundles": [
+    {
+      "path": "entry.js",
+      "bytes": 293,
+      "observedBytes": 208,
+      "unobservedBytes": 85,
+      "unmeasuredBytes": 0,
+      "sources": [
+        {
+          "source": "[unmapped]",
+          "package": "[unmapped]",
+          "hasContent": false,
+          "firstObserved": [
+            {
+              "scenario": "initial",
+              "bytes": 41,
+              "earlierUnmeasured": false
+            }
+          ],
+          "estimatedCompression": {
+            "gzipBytes": 61,
+            "brotliBytes": 45
+          },
+          "bytes": 41,
+          "observedBytes": 41,
+          "unobservedBytes": 0,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "../../fixtures/feature.js",
+          "package": "[application]",
+          "hasContent": false,
+          "firstObserved": [
+            {
+              "scenario": "initial",
+              "bytes": 21,
+              "earlierUnmeasured": false
+            },
+            {
+              "scenario": "interaction-delta",
+              "bytes": 31,
+              "earlierUnmeasured": false
+            }
+          ],
+          "estimatedCompression": {
+            "gzipBytes": 134,
+            "brotliBytes": 104
+          },
+          "bytes": 137,
+          "observedBytes": 52,
+          "unobservedBytes": 85,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "../../fixtures/startup.js",
+          "package": "[application]",
+          "hasContent": false,
+          "firstObserved": [
+            {
+              "scenario": "initial",
+              "bytes": 59,
+              "earlierUnmeasured": false
+            }
+          ],
+          "estimatedCompression": {
+            "gzipBytes": 57,
+            "brotliBytes": 45
+          },
+          "bytes": 59,
+          "observedBytes": 59,
+          "unobservedBytes": 0,
+          "unmeasuredBytes": 0
+        },
+        {
+          "source": "../../fixtures/entry.js",
+          "package": "[application]",
+          "hasContent": false,
+          "firstObserved": [
+            {
+              "scenario": "initial",
+              "bytes": 56,
+              "earlierUnmeasured": false
+            }
+          ],
+          "estimatedCompression": {
+            "gzipBytes": 76,
+            "brotliBytes": 58
+          },
+          "bytes": 56,
+          "observedBytes": 56,
+          "unobservedBytes": 0,
+          "unmeasuredBytes": 0
+        }
+      ],
+      "verification": [
+        {
+          "scenario": "initial",
+          "format": "coldpath",
+          "source": "sha256",
+          "sourceMap": "capture-bound"
+        },
+        {
+          "scenario": "interaction-delta",
+          "format": "coldpath",
+          "source": "sha256",
+          "sourceMap": "capture-bound"
+        }
+      ]
+    }
+  ]
+}

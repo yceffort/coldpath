@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self' about:; base-uri 'none'; form-action 'none'"
+    />
+    <title>coldpath report</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="application/json" id="report-data">
+      __COLDPATH_DATA__
+    </script>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

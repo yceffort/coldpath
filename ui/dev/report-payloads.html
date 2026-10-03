@@ -1,0 +1,396 @@
+<script type="application/json" data-encoding="json" id="report-data">
+  {
+    "schemaVersion": 3,
+    "totals": {"bytes": 293, "observedBytes": 208, "unobservedBytes": 85, "unmeasuredBytes": 0},
+    "scenarios": ["initial", "interaction-delta"],
+    "initialScenario": "initial",
+    "scenarioReports": [
+      {
+        "scenario": "initial",
+        "totals": {"bytes": 293, "observedBytes": 177, "unobservedBytes": 116, "unmeasuredBytes": 0},
+        "bundles": [
+          {
+            "path": "entry.js",
+            "sources": [
+              {
+                "source": "../../fixtures/feature.js",
+                "package": "[application]",
+                "bytes": 137,
+                "observedBytes": 21,
+                "unobservedBytes": 116,
+                "unmeasuredBytes": 0
+              },
+              {
+                "source": "../../fixtures/startup.js",
+                "package": "[application]",
+                "bytes": 59,
+                "observedBytes": 59,
+                "unobservedBytes": 0,
+                "unmeasuredBytes": 0
+              },
+              {
+                "source": "../../fixtures/entry.js",
+                "package": "[application]",
+                "bytes": 56,
+                "observedBytes": 56,
+                "unobservedBytes": 0,
+                "unmeasuredBytes": 0
+              },
+              {
+                "source": "[unmapped]",
+                "package": "[unmapped]",
+                "bytes": 41,
+                "observedBytes": 41,
+                "unobservedBytes": 0,
+                "unmeasuredBytes": 0
+              }
+            ],
+            "bytes": 293,
+            "observedBytes": 177,
+            "unobservedBytes": 116,
+            "unmeasuredBytes": 0
+          }
+        ],
+        "sources": [
+          {
+            "source": "../../fixtures/feature.js",
+            "package": "[application]",
+            "bytes": 137,
+            "observedBytes": 21,
+            "unobservedBytes": 116,
+            "unmeasuredBytes": 0
+          },
+          {
+            "source": "../../fixtures/startup.js",
+            "package": "[application]",
+            "bytes": 59,
+            "observedBytes": 59,
+            "unobservedBytes": 0,
+            "unmeasuredBytes": 0
+          },
+          {
+            "source": "../../fixtures/entry.js",
+            "package": "[application]",
+            "bytes": 56,
+            "observedBytes": 56,
+            "unobservedBytes": 0,
+            "unmeasuredBytes": 0
+          },
+          {"source": "[unmapped]", "package": "[unmapped]", "bytes": 41, "observedBytes": 41, "unobservedBytes": 0, "unmeasuredBytes": 0}
+        ],
+        "packages": [
+          {"package": "[application]", "bytes": 252, "observedBytes": 136, "unobservedBytes": 116, "unmeasuredBytes": 0},
+          {"package": "[unmapped]", "bytes": 41, "observedBytes": 41, "unobservedBytes": 0, "unmeasuredBytes": 0}
+        ],
+        "interactionCandidates": []
+      },
+      {
+        "scenario": "interaction-delta",
+        "totals": {"bytes": 293, "observedBytes": 31, "unobservedBytes": 262, "unmeasuredBytes": 0},
+        "bundles": [
+          {
+            "path": "entry.js",
+            "sources": [
+              {
+                "source": "../../fixtures/feature.js",
+                "package": "[application]",
+                "bytes": 137,
+                "observedBytes": 31,
+                "unobservedBytes": 106,
+                "unmeasuredBytes": 0
+              },
+              {
+                "source": "../../fixtures/startup.js",
+                "package": "[application]",
+                "bytes": 59,
+                "observedBytes": 0,
+                "unobservedBytes": 59,
+                "unmeasuredBytes": 0
+              },
+              {
+                "source": "../../fixtures/entry.js",
+                "package": "[application]",
+                "bytes": 56,
+                "observedBytes": 0,
+                "unobservedBytes": 56,
+                "unmeasuredBytes": 0
+              },
+              {
+                "source": "[unmapped]",
+                "package": "[unmapped]",
+                "bytes": 41,
+                "observedBytes": 0,
+                "unobservedBytes": 41,
+                "unmeasuredBytes": 0
+              }
+            ],
+            "bytes": 293,
+            "observedBytes": 31,
+            "unobservedBytes": 262,
+            "unmeasuredBytes": 0
+          }
+        ],
+        "sources": [
+          {
+            "source": "../../fixtures/feature.js",
+            "package": "[application]",
+            "bytes": 137,
+            "observedBytes": 31,
+            "unobservedBytes": 106,
+            "unmeasuredBytes": 0
+          },
+          {
+            "source": "../../fixtures/startup.js",
+            "package": "[application]",
+            "bytes": 59,
+            "observedBytes": 0,
+            "unobservedBytes": 59,
+            "unmeasuredBytes": 0
+          },
+          {
+            "source": "../../fixtures/entry.js",
+            "package": "[application]",
+            "bytes": 56,
+            "observedBytes": 0,
+            "unobservedBytes": 56,
+            "unmeasuredBytes": 0
+          },
+          {"source": "[unmapped]", "package": "[unmapped]", "bytes": 41, "observedBytes": 0, "unobservedBytes": 41, "unmeasuredBytes": 0}
+        ],
+        "packages": [
+          {"package": "[application]", "bytes": 252, "observedBytes": 31, "unobservedBytes": 221, "unmeasuredBytes": 0},
+          {"package": "[unmapped]", "bytes": 41, "observedBytes": 0, "unobservedBytes": 41, "unmeasuredBytes": 0}
+        ],
+        "interactionCandidates": [
+          {
+            "source": "../../fixtures/feature.js",
+            "package": "[application]",
+            "interactionOnlyBytes": 31,
+            "initialUnmeasuredObservedBytes": 0,
+            "estimatedDeferrableCompression": {"gzipBytes": 52, "brotliBytes": 35}
+          }
+        ]
+      }
+    ],
+    "baseline": null,
+    "importPaths": null,
+    "recommendations": [
+      {
+        "kind": "inspect-imports",
+        "source": "../../fixtures/feature.js",
+        "scenario": "interaction-delta",
+        "bytes": 31,
+        "estimatedCompression": {"gzipBytes": 52, "brotliBytes": 35},
+        "importPath": null,
+        "initialObservedBytes": 21,
+        "initialTopLevelOnly": false,
+        "explanation": "These measured bytes execute in this interaction but not initially. Inspect the import graph and side effects before choosing a lazy-loading boundary."
+      }
+    ],
+    "warnings": [],
+    "excludedBundles": [],
+    "budgetFailures": [],
+    "compression": null,
+    "duplicateSources": [],
+    "bundles": [
+      {
+        "path": "entry.js",
+        "bytes": 293,
+        "observedBytes": 208,
+        "unobservedBytes": 85,
+        "unmeasuredBytes": 0,
+        "sources": [
+          {
+            "source": "[unmapped]",
+            "package": "[unmapped]",
+            "hasContent": false,
+            "firstObserved": [{"scenario": "initial", "bytes": 41, "earlierUnmeasured": false}],
+            "estimatedCompression": {"gzipBytes": 61, "brotliBytes": 45},
+            "bytes": 41,
+            "observedBytes": 41,
+            "unobservedBytes": 0,
+            "unmeasuredBytes": 0
+          },
+          {
+            "source": "../../fixtures/feature.js",
+            "package": "[application]",
+            "hasContent": true,
+            "firstObserved": [
+              {"scenario": "initial", "bytes": 21, "earlierUnmeasured": false},
+              {"scenario": "interaction-delta", "bytes": 31, "earlierUnmeasured": false}
+            ],
+            "estimatedCompression": {"gzipBytes": 134, "brotliBytes": 104},
+            "bytes": 137,
+            "observedBytes": 52,
+            "unobservedBytes": 85,
+            "unmeasuredBytes": 0
+          },
+          {
+            "source": "../../fixtures/startup.js",
+            "package": "[application]",
+            "hasContent": true,
+            "firstObserved": [{"scenario": "initial", "bytes": 59, "earlierUnmeasured": false}],
+            "estimatedCompression": {"gzipBytes": 57, "brotliBytes": 45},
+            "bytes": 59,
+            "observedBytes": 59,
+            "unobservedBytes": 0,
+            "unmeasuredBytes": 0
+          },
+          {
+            "source": "../../fixtures/entry.js",
+            "package": "[application]",
+            "hasContent": true,
+            "firstObserved": [{"scenario": "initial", "bytes": 56, "earlierUnmeasured": false}],
+            "estimatedCompression": {"gzipBytes": 76, "brotliBytes": 58},
+            "bytes": 56,
+            "observedBytes": 56,
+            "unobservedBytes": 0,
+            "unmeasuredBytes": 0
+          }
+        ],
+        "verification": [
+          {"scenario": "initial", "format": "coldpath", "source": "sha256", "sourceMap": "capture-bound"},
+          {"scenario": "interaction-delta", "format": "coldpath", "source": "sha256", "sourceMap": "capture-bound"}
+        ]
+      }
+    ]
+  }
+</script>
+<script type="application/json" data-encoding="json" id="chunk-data-0">
+  {
+    "generatedSource": "(()=\u003e{function r(){return function(t){return t?\"한🔥\":\"다른 경로\"}}function e(){throw new Error(\"This function must remain unobserved\")}globalThis.__startupCount=(globalThis.__startupCount??0)+1;globalThis.__coldpathApp={run:r(),unusedFeature:e};})();\n//# sourceMappingURL=entry.js.map\n",
+    "contents": [
+      null,
+      "export function makeFeature() {\n  return function later(flag) {\n    return flag ? '한🔥' : '다른 경로'\n  }\n}\n\nexport function unusedFeature() {\n  throw new Error('This function must remain unobserved')\n}\n",
+      "globalThis.__startupCount = (globalThis.__startupCount ?? 0) + 1\n",
+      "import {makeFeature, unusedFeature} from './feature.js'\nimport './startup.js'\n\nglobalThis.__coldpathApp = {run: makeFeature(), unusedFeature}\n"
+    ],
+    "spans": [
+      [0, 6, 0, 6, 0, 0, null, null],
+      [6, 15, 6, 15, 1, 0, 0, 7],
+      [15, 18, 15, 18, 1, 0, 0, 16],
+      [18, 19, 18, 19, 1, 0, 0, 30],
+      [19, 26, 19, 26, 1, 0, 1, 2],
+      [26, 35, 26, 35, 1, 0, 1, 9],
+      [35, 37, 35, 37, 1, 0, 1, 24],
+      [37, 38, 37, 38, 1, 0, 1, 30],
+      [38, 45, 38, 45, 1, 0, 2, 4],
+      [45, 47, 45, 47, 1, 0, 2, 11],
+      [47, 56, 47, 52, 1, 0, 2, 18],
+      [56, 57, 52, 53, 1, 1, 2, 18],
+      [57, 72, 53, 60, 1, 1, 2, 26],
+      [72, 73, 60, 61, 1, 0, 3, 2],
+      [73, 74, 61, 62, 1, 0, 4, 0],
+      [74, 83, 62, 71, 1, 1, 6, 7],
+      [83, 86, 71, 74, 1, 1, 6, 16],
+      [86, 87, 74, 75, 1, 1, 6, 32],
+      [87, 93, 75, 81, 1, 1, 7, 2],
+      [93, 97, 81, 85, 1, 1, 7, 8],
+      [97, 103, 85, 91, 1, 1, 7, 12],
+      [103, 141, 91, 129, 1, 1, 7, 18],
+      [141, 142, 129, 130, 1, 1, 7, 56],
+      [142, 143, 130, 131, 1, 1, 8, 0],
+      [143, 154, 131, 142, 2, 0, 0, 0],
+      [154, 170, 142, 158, 2, 0, 0, 11],
+      [170, 181, 158, 169, 2, 0, 0, 29],
+      [181, 197, 169, 185, 2, 0, 0, 40],
+      [197, 200, 185, 188, 2, 0, 0, 58],
+      [200, 202, 188, 190, 2, 0, 0, 63],
+      [202, 213, 190, 201, 3, 0, 3, 0],
+      [213, 227, 201, 215, 3, 0, 3, 11],
+      [227, 228, 215, 216, 3, 0, 3, 27],
+      [228, 232, 216, 220, 3, 0, 3, 28],
+      [232, 234, 220, 222, 3, 0, 3, 33],
+      [234, 236, 222, 224, 3, 0, 3, 45],
+      [236, 250, 224, 238, 3, 0, 3, 48],
+      [250, 251, 238, 239, 3, 0, 3, 48],
+      [251, 258, 239, 246, 3, 0, 3, 61],
+      [258, 293, 246, 281, 0, 0, null, null]
+    ],
+    "scenarioSpans": {
+      "initial": [
+        [0, 6, 0, 6, 0, 0, null, null],
+        [6, 15, 6, 15, 1, 0, 0, 7],
+        [15, 18, 15, 18, 1, 0, 0, 16],
+        [18, 19, 18, 19, 1, 0, 0, 30],
+        [19, 26, 19, 26, 1, 0, 1, 2],
+        [26, 35, 26, 35, 1, 1, 1, 9],
+        [35, 37, 35, 37, 1, 1, 1, 24],
+        [37, 38, 37, 38, 1, 1, 1, 30],
+        [38, 45, 38, 45, 1, 1, 2, 4],
+        [45, 47, 45, 47, 1, 1, 2, 11],
+        [47, 57, 47, 53, 1, 1, 2, 18],
+        [57, 72, 53, 60, 1, 1, 2, 26],
+        [72, 73, 60, 61, 1, 1, 3, 2],
+        [73, 74, 61, 62, 1, 0, 4, 0],
+        [74, 83, 62, 71, 1, 1, 6, 7],
+        [83, 86, 71, 74, 1, 1, 6, 16],
+        [86, 87, 74, 75, 1, 1, 6, 32],
+        [87, 93, 75, 81, 1, 1, 7, 2],
+        [93, 97, 81, 85, 1, 1, 7, 8],
+        [97, 103, 85, 91, 1, 1, 7, 12],
+        [103, 141, 91, 129, 1, 1, 7, 18],
+        [141, 142, 129, 130, 1, 1, 7, 56],
+        [142, 143, 130, 131, 1, 1, 8, 0],
+        [143, 154, 131, 142, 2, 0, 0, 0],
+        [154, 170, 142, 158, 2, 0, 0, 11],
+        [170, 181, 158, 169, 2, 0, 0, 29],
+        [181, 197, 169, 185, 2, 0, 0, 40],
+        [197, 200, 185, 188, 2, 0, 0, 58],
+        [200, 202, 188, 190, 2, 0, 0, 63],
+        [202, 213, 190, 201, 3, 0, 3, 0],
+        [213, 227, 201, 215, 3, 0, 3, 11],
+        [227, 228, 215, 216, 3, 0, 3, 27],
+        [228, 232, 216, 220, 3, 0, 3, 28],
+        [232, 234, 220, 222, 3, 0, 3, 33],
+        [234, 236, 222, 224, 3, 0, 3, 45],
+        [236, 250, 224, 238, 3, 0, 3, 48],
+        [250, 251, 238, 239, 3, 0, 3, 48],
+        [251, 258, 239, 246, 3, 0, 3, 61],
+        [258, 293, 246, 281, 0, 0, null, null]
+      ],
+      "interaction-delta": [
+        [0, 6, 0, 6, 0, 1, null, null],
+        [6, 15, 6, 15, 1, 1, 0, 7],
+        [15, 18, 15, 18, 1, 1, 0, 16],
+        [18, 19, 18, 19, 1, 1, 0, 30],
+        [19, 26, 19, 26, 1, 1, 1, 2],
+        [26, 35, 26, 35, 1, 0, 1, 9],
+        [35, 37, 35, 37, 1, 0, 1, 24],
+        [37, 38, 37, 38, 1, 0, 1, 30],
+        [38, 45, 38, 45, 1, 0, 2, 4],
+        [45, 47, 45, 47, 1, 0, 2, 11],
+        [47, 56, 47, 52, 1, 0, 2, 18],
+        [56, 57, 52, 53, 1, 1, 2, 18],
+        [57, 72, 53, 60, 1, 1, 2, 26],
+        [72, 73, 60, 61, 1, 0, 3, 2],
+        [73, 74, 61, 62, 1, 1, 4, 0],
+        [74, 83, 62, 71, 1, 1, 6, 7],
+        [83, 86, 71, 74, 1, 1, 6, 16],
+        [86, 87, 74, 75, 1, 1, 6, 32],
+        [87, 93, 75, 81, 1, 1, 7, 2],
+        [93, 97, 81, 85, 1, 1, 7, 8],
+        [97, 103, 85, 91, 1, 1, 7, 12],
+        [103, 141, 91, 129, 1, 1, 7, 18],
+        [141, 142, 129, 130, 1, 1, 7, 56],
+        [142, 143, 130, 131, 1, 1, 8, 0],
+        [143, 154, 131, 142, 2, 1, 0, 0],
+        [154, 170, 142, 158, 2, 1, 0, 11],
+        [170, 181, 158, 169, 2, 1, 0, 29],
+        [181, 197, 169, 185, 2, 1, 0, 40],
+        [197, 200, 185, 188, 2, 1, 0, 58],
+        [200, 202, 188, 190, 2, 1, 0, 63],
+        [202, 213, 190, 201, 3, 1, 3, 0],
+        [213, 227, 201, 215, 3, 1, 3, 11],
+        [227, 228, 215, 216, 3, 1, 3, 27],
+        [228, 232, 216, 220, 3, 1, 3, 28],
+        [232, 234, 220, 222, 3, 1, 3, 33],
+        [234, 236, 222, 224, 3, 1, 3, 45],
+        [236, 250, 224, 238, 3, 1, 3, 48],
+        [250, 251, 238, 239, 3, 1, 3, 48],
+        [251, 258, 239, 246, 3, 1, 3, 61],
+        [258, 293, 246, 281, 0, 1, null, null]
+      ]
+    }
+  }
+</script>
