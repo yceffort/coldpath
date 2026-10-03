@@ -25,7 +25,7 @@
     "build": "cargo build --locked --release",
     "test": "cargo test --locked && pnpm test:browser && pnpm test:corpus && pnpm test:package",
     "test:corpus": "node scripts/verify-label-score.mjs && node scripts/verify-graphs.mjs && node scripts/verify-corpus.mjs && node scripts/verify-recovery.mjs",
-    "test:browser": "node scripts/verify.mjs && node scripts/verify-formats.mjs && node scripts/verify-collector.mjs && node scripts/verify-environment.mjs && node scripts/verify-flows.mjs && node scripts/verify-treemap.mjs && node scripts/verify-comparison.mjs && node scripts/verify-inferred.mjs",
+    "test:browser": "node scripts/verify.mjs && node scripts/verify-formats.mjs && node scripts/verify-collector.mjs && node scripts/verify-environment.mjs && node scripts/verify-flows.mjs && node scripts/verify-treemap.mjs && node scripts/verify-comparison.mjs && node scripts/verify-inferred.mjs && node scripts/verify-profile.mjs",
     "collect": "node bin/coldpath.mjs collect",
     "test:package": "node scripts/verify-package.mjs",
     "lint": "oxlint --deny-warnings bin lib scripts benchmarks examples/demo && oxfmt --check bin lib scripts benchmarks/*.mjs examples/demo",
