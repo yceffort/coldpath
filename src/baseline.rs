@@ -67,8 +67,16 @@ struct Row {
     source: Option<String>,
     package: Option<String>,
     path: Option<String>,
+    /// A bundle row's sources.
+    #[serde(default)]
+    sources: Vec<NamedSource>,
     #[serde(flatten)]
     counts: Counts,
+}
+
+#[derive(Deserialize)]
+struct NamedSource {
+    source: String,
 }
 
 #[derive(Deserialize)]
@@ -232,7 +240,33 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
         }
     }
     let cpu = match (&baseline.cpu, &report.cpu) {
-        (Some(before), Some(after)) => Some(crate::cpu::compare(before, after, &mut warnings)?),
+        (Some(before), Some(after)) => {
+            let before_bundles = baseline
+                .bundles
+                .iter()
+                .filter_map(|row| {
+                    let sources = row.sources.iter().map(|s| s.source.clone()).collect();
+                    row.path.clone().map(|path| (path, sources))
+                })
+                .collect();
+            let after_bundles = report
+                .bundles
+                .iter()
+                .map(|b| {
+                    (
+                        b.path.clone(),
+                        b.sources.iter().map(|s| s.source.clone()).collect(),
+                    )
+                })
+                .collect();
+            Some(crate::cpu::compare(
+                before,
+                &before_bundles,
+                after,
+                &after_bundles,
+                &mut warnings,
+            )?)
+        }
         (None, Some(_)) => {
             warnings
                 .push("The baseline has no CPU profiles; CPU self time is not compared.".into());

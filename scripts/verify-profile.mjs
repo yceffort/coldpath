@@ -32,7 +32,7 @@ async function serve(dir, edit = (path, body) => body) {
     const path = resolve(dir, '.' + (pathname === '/' ? '/index.html' : pathname))
     if (!path.startsWith(dir + sep)) return response.writeHead(403).end()
     try {
-      response.setHeader('content-type', path.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8')
+      response.setHeader('content-type', path.toLowerCase().endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8')
       response.end(edit(path, await readFile(path)))
     } catch {
       response.writeHead(404).end()
@@ -76,7 +76,9 @@ for (const [name, profile] of Object.entries(profiles)) {
   }
   const bundle = profile.scripts.find((script) => script.path.startsWith('assets/index-'))
   assert.equal(bundle.sha256, sha256(await readFile(join(work, 'demo', bundle.path))))
-  assert.equal(profile.environment.machine.cores > 0, true)
+  // Comparisons need one machine and boot: Linux boot_id and macOS kern.bootsessionuuid are UUIDs.
+  assert(profile.environment.machine.cores > 0)
+  assert.match(profile.environment.machine.boot, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i)
 }
 assert(
   profiles.search.scripts.some((script) => script.path.startsWith('assets/search-')),
@@ -119,7 +121,7 @@ try {
   const detail = page.locator('#file')
   await detail.getByRole('heading', {name: 'CPU self time'}).waitFor()
   const item = detail.locator('.facts div').filter({hasText: 'open-report, action window'})
-  assert.match(await item.locator('dd').textContent(), /^(Insufficient samples|Not sampled)$/)
+  assert.match(await item.locator('dd').textContent(), /^(Insufficient samples|No function samples)$/)
   // A measured source: the Intl formatter in format.js during page load.
   await page.getByRole('button', {name: 'All bundles', exact: true}).click()
   await page
@@ -153,14 +155,29 @@ try {
     /browser\/disk source mismatch: assets\/index-/,
   )
   await assert.rejects(coldpath('profile', '--scenarios', 'stale.scenarios.json', '--runs', '1'), /--runs must be an integer of at least 2/)
+  await scenarios('prefix.scenarios.json', {
+    url: stale.origin + '/',
+    dir: 'demo',
+    prefix: '/static/',
+    out: 'prefix-out',
+    scenarios: [{name: 'initial'}],
+  })
+  await assert.rejects(
+    coldpath('profile', '--scenarios', 'prefix.scenarios.json', '--runs', '2'),
+    /no scripts matched --prefix or --cdn-prefix/,
+  )
 } finally {
   await stale.close()
 }
 const flows = join(root, 'fixtures', 'flows')
 const pages = createServer(async (request, response) => {
   const html = (body) => response.setHeader('content-type', 'text/html; charset=utf-8').end(`<!doctype html><meta charset="utf-8">${body}`)
-  if (request.url === '/') html('<script src="/assets/first.js"></script><a href="/second">next</a>')
+  if (request.url === '/')
+    html('<script src="/assets/first.js"></script><a href="/second">next</a><a href="/download">download</a><a href="/empty">empty</a>')
   else if (request.url === '/second') html('<script src="/assets/second.js"></script>')
+  else if (request.url === '/download')
+    response.writeHead(200, {'content-type': 'text/csv', 'content-disposition': 'attachment; filename="orders.csv"'}).end('id\n1\n')
+  else if (request.url === '/empty') response.writeHead(204).end()
   else if (request.url.startsWith('/assets/'))
     response.setHeader('content-type', 'text/javascript; charset=utf-8').end(await readFile(join(flows, request.url.slice(8))))
   else response.writeHead(404).end()
@@ -178,6 +195,16 @@ try {
     join(work, 'worker.mjs'),
     'export default async function ({page}) {\n  await page.waitForFunction(() => globalThis.__worker === 42)\n}\n',
   )
+  // Navigations that commit no new document: a download and a 204 response.
+  await writeFile(
+    join(work, 'stay.mjs'),
+    `export default async function ({page}) {
+  const download = page.waitForEvent('download')
+  await page.getByRole('link', {name: 'download'}).click()
+  await download
+  await page.getByRole('link', {name: 'empty'}).click()
+}\n`,
+  )
   const url = `http://127.0.0.1:${pages.address().port}/`
   await scenarios('flows.scenarios.json', {
     url,
@@ -191,6 +218,16 @@ try {
     coldpath('profile', '--scenarios', 'flows.scenarios.json', '--runs', '2'),
     /does not support multi-document navigation flows/,
   )
+  await scenarios('stay.scenarios.json', {
+    url,
+    dir: flows,
+    prefix: '/assets/',
+    waitMs: 0,
+    out: 'stay-out',
+    scenarios: [{name: 'stay', actions: 'stay.mjs'}],
+  })
+  await coldpath('profile', '--scenarios', 'stay.scenarios.json', '--runs', '2')
+  assert.deepEqual(Object.keys((await read('stay-out/stay.profile.json')).windows), ['load', 'action'])
   await scenarios('worker.scenarios.json', {
     url,
     dir: flows,
@@ -205,6 +242,54 @@ try {
 } finally {
   await new Promise((done) => pages.close(done))
 }
+
+// Scripts the debugger cannot read: one renamed by `//# sourceURL`, and one that V8 collects after it
+// ran once (garbage collection is forced). A `.JS` script is not a bundle the analyzer scans.
+const odd = join(work, 'odd')
+await mkdir(odd, {recursive: true})
+const busy = 'let x = 0; for (let i = 0; i < 2000000; i++) x = (x * 31 + i) % 1000003; globalThis.__busy = x'
+await writeFile(join(odd, 'named.js'), `function named() { ${busy} }\nnamed()\nglobalThis.named = named\n//# sourceURL=named.js\n`)
+// Blocks keep each classic script's `let` out of the shared global scope.
+await writeFile(join(odd, 'once.js'), `{ ${busy} }\n`)
+await writeFile(join(odd, 'UPPER.JS'), `{ ${busy} }\n`)
+await writeFile(
+  join(odd, 'index.html'),
+  '<!doctype html><meta charset="utf-8"><script src="/named.js"></script><script src="/once.js"></script><script src="/UPPER.JS"></script>',
+)
+await writeFile(
+  join(work, 'collect-garbage.mjs'),
+  `export default async function ({page, context}) {
+  const cdp = await context.newCDPSession(page)
+  await cdp.send('HeapProfiler.collectGarbage')
+  await cdp.detach()
+}\n`,
+)
+const oddServer = await serve(odd)
+try {
+  await scenarios('odd.scenarios.json', {
+    url: oddServer.origin + '/',
+    dir: 'odd',
+    waitMs: 0,
+    out: 'odd-out',
+    scenarios: [{name: 'odd', actions: 'collect-garbage.mjs'}],
+  })
+  await coldpath('profile', '--scenarios', 'odd.scenarios.json', '--runs', '2')
+} finally {
+  await oddServer.close()
+}
+const oddProfile = await read('odd-out/odd.profile.json')
+assert.deepEqual(
+  oddProfile.scripts.map((script) => script.path),
+  ['named.js', 'once.js'],
+)
+const oddScript = (path) => oddProfile.scripts.find((script) => script.path === path)
+assert(oddScript('named.js').functions.some((f) => f.windows.load.samples.every((count) => count > 0)))
+assert(
+  oddScript('once.js').topLevel.load.samples.every((count) => count > 0),
+  'a collected script keeps its samples in every run',
+)
+await coldpath('--dir', 'odd', '--profile', 'odd-out/odd.profile.json', '--json', 'odd.json')
+assert((await read('odd.json')).cpu.scenarios[0].windows[0].topLevel.some((row) => row.path === 'once.js'))
 
 // A controlled regression: a busy loop added to a function that only runs after a click. The source
 // file keeps its path, so both builds' maps name the same source.

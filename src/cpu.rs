@@ -633,7 +633,8 @@ pub struct CpuChange {
     pub package: String,
     /// `regressed`, `improved`, `unchanged` (shift below the minimum effect), or `inconclusive`.
     pub change: &'static str,
-    /// Absent when the report has no row: the source was not sampled or not profiled.
+    /// Absent when no bundle that report profiled contains the source. A source of a profiled
+    /// bundle without samples has a summary with zero samples.
     pub before: Option<CostSummary>,
     pub after: Option<CostSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -668,10 +669,26 @@ fn validate_report(report: &CpuReport) -> Result<()> {
     Ok(())
 }
 
-/// Compares per-run self time of each source and window present in either report.
+/// Source names of each analyzed bundle, keyed by bundle path.
+pub type BundleSources = BTreeMap<String, BTreeSet<String>>;
+
+/// Sources of the bundles a scenario's profiles loaded.
+fn loaded<'a>(scenario: &CpuScenario, bundles: &'a BundleSources) -> BTreeSet<&'a str> {
+    scenario
+        .bundles
+        .iter()
+        .filter_map(|path| bundles.get(path))
+        .flatten()
+        .map(String::as_str)
+        .collect()
+}
+
+/// Compares per-run self time of each source in each window both reports profiled.
 pub fn compare(
     before: &CpuReport,
+    before_bundles: &BundleSources,
     after: &CpuReport,
+    after_bundles: &BundleSources,
     warnings: &mut Vec<String>,
 ) -> Result<CpuComparison> {
     validate_report(before)?;
@@ -714,6 +731,22 @@ pub fn compare(
         if !comparable {
             warnings.push(format!("CPU scenario {:?}: the profile differs from the baseline in {}; its sources are inconclusive. Profile both builds on one machine in one session.", scenario.scenario, differences.join(", ")));
         }
+        for base_window in &base.windows {
+            if !scenario
+                .windows
+                .iter()
+                .any(|w| w.window == base_window.window)
+            {
+                warnings.push(format!(
+                    "Baseline CPU scenario {:?} has a {} window that the current profile lacks.",
+                    scenario.scenario, base_window.window
+                ));
+            }
+        }
+        let (base_loaded, current_loaded) = (
+            loaded(base, before_bundles),
+            loaded(scenario, after_bundles),
+        );
         for window in &scenario.windows {
             let Some(base_window) = base.windows.iter().find(|w| w.window == window.window) else {
                 warnings.push(format!(
@@ -733,14 +766,25 @@ pub fn compare(
                     find(&base_window.sources, name),
                     find(&window.sources, name),
                 );
+                let side = |row: Option<&CpuSource>, loaded: &BTreeSet<&str>| match row {
+                    Some(row) => Some(row.cost.summary()),
+                    None if loaded.contains(name) => Some(CostSummary {
+                        status: CpuStatus::Insufficient,
+                        median_samples: 0.0,
+                        median_us: 0.0,
+                        q1_us: 0.0,
+                        q3_us: 0.0,
+                    }),
+                    None => None,
+                };
                 let mut row = CpuChange {
                     scenario: scenario.scenario.clone(),
                     window: window.window.clone(),
                     source: name.into(),
                     package: b.or(a).unwrap().package.clone(),
                     change: "inconclusive",
-                    before: a.map(|row| row.cost.summary()),
-                    after: b.map(|row| row.cost.summary()),
+                    before: side(a, &base_loaded),
+                    after: side(b, &current_loaded),
                     shift_us: None,
                     relative_shift: None,
                     p_value: None,

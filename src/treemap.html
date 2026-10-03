@@ -1297,29 +1297,32 @@
               const holders = report.bundles.filter((bundle) => bundle.sources.some((s) => s.source === focus.source)).map((bundle) => bundle.path)
               const cpu = element('dl')
               cpu.className = 'facts'
+              const samples = (count) => number(count) + (count === 1 ? ' sample' : ' samples')
+              const fact = (term, value, detail) => {
+                const item = element('div')
+                item.append(element('dt', term), element('dd', value), element('small', detail))
+                cpu.append(item)
+              }
               for (const scenario of report.cpu.scenarios) {
-                const profiled = holders.some((path) => scenario.bundles.includes(path))
+                const profiled = holders.filter((path) => scenario.bundles.includes(path))
+                const runs = ' in ' + scenario.runs + ' runs'
                 for (const window of scenario.windows) {
+                  const label = scenario.scenario + ', ' + window.window + ' window'
                   const row = window.sources.find((s) => s.source === focus.source)
-                  if (!row && !profiled) continue
                   // An insufficient value is never the headline, so it cannot read as a low cost.
-                  const insufficient = row?.status === 'insufficient'
-                  const samples = (count) => number(count) + (count === 1 ? ' sample' : ' samples')
-                  const item = element('div')
-                  item.append(
-                    element('dt', scenario.scenario + ', ' + window.window + ' window'),
-                    element('dd', !row ? 'Not sampled' : insufficient ? 'Insufficient samples' : milliseconds(row.medianUs)),
-                    element('small', (!row ? '0 samples' : (insufficient ? 'median ' + milliseconds(row.medianUs) :
-                      'Q1 to Q3: ' + milliseconds(row.q1Us) + ' to ' + milliseconds(row.q3Us)) + ', ' + samples(row.medianSamples) + ' per run') +
-                      ' in ' + scenario.runs + ' runs'),
-                  )
-                  cpu.append(item)
+                  if (row?.status === 'measured')
+                    fact(label, milliseconds(row.medianUs), 'Q1 to Q3: ' + milliseconds(row.q1Us) + ' to ' + milliseconds(row.q3Us) + ', ' + samples(row.medianSamples) + ' per run' + runs)
+                  else if (row) fact(label, 'Insufficient samples', 'median ' + milliseconds(row.medianUs) + ', ' + samples(row.medianSamples) + ' per run' + runs)
+                  else if (profiled.length) fact(label, 'No function samples', '0 samples' + runs)
+                  // Module-level code in a scope-hoisted bundle runs in the bundle's top level, which no source owns.
+                  for (const top of window.topLevel.filter((top) => top.status === 'measured' && profiled.includes(top.path)))
+                    fact(label + ', top level of ' + top.path, milliseconds(top.medianUs), 'code no single source owns, such as module evaluation in a scope-hoisted bundle; ' + samples(top.medianSamples) + ' per run' + runs)
                 }
               }
               if (cpu.children.length) {
                 $('file').append(element('h3', 'CPU self time'), cpu)
-                note('Median and quartiles over runs, adding up every bundle with this source. Below ' + report.cpu.minSamples +
-                  ' samples per run a value is insufficient: it is unreliable, and not sampled does not mean cheap. Code a minifier inlined counts toward the function it was inlined into.')
+                note('Self time of this source\'s functions: median and quartiles over runs, adding up every bundle with this source. Below ' + report.cpu.minSamples +
+                  ' samples per run a value is insufficient: it is unreliable, and no samples does not mean cheap. Code a minifier inlined counts toward the function it was inlined into; module-level code counts toward its bundle\'s top level, or toward [unmapped] in a bundle that wraps each module in a function, such as webpack.')
               }
             }
             $('file').append(element('h3', 'Why it is in the bundle'))

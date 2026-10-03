@@ -468,9 +468,9 @@ fn baseline_reports_significant_changes_and_never_calls_missing_evidence_unchang
             .all(|r| !matches!(r.change, "regressed" | "improved"))
     );
 
-    // A source measured only after the change, and a source no longer sampled.
+    // A source no longer sampled, though its bundle was profiled: zero samples, not absent.
     let moved = f
-        .analyze(&[f.profile("moved.json", ten_runs(&[(5, slower)], environment))])
+        .analyze(&[f.profile("moved.json", ten_runs(&[(5, slower)], environment.clone()))])
         .unwrap();
     let rows = coldpath::baseline::compare(&moved, &serde_json::to_vec(&before).unwrap())
         .unwrap()
@@ -478,7 +478,47 @@ fn baseline_reports_significant_changes_and_never_calls_missing_evidence_unchang
         .unwrap()
         .sources;
     let gone = rows.iter().find(|r| r.source == "src/a.js").unwrap();
-    assert_eq!((gone.change, gone.after.is_none()), ("inconclusive", true));
+    assert_eq!(gone.change, "inconclusive");
+    let current = gone.after.as_ref().unwrap();
+    assert_eq!(
+        (current.status, current.median_samples),
+        (cpu::CpuStatus::Insufficient, 0.0)
+    );
+    // The same from the baseline side, whose bundle sources come from its JSON.
+    let rows = coldpath::baseline::compare(&before, &serde_json::to_vec(&moved).unwrap())
+        .unwrap()
+        .cpu
+        .unwrap()
+        .sources;
+    let new = rows.iter().find(|r| r.source == "src/a.js").unwrap();
+    assert_eq!(new.change, "inconclusive");
+    let base = new.before.as_ref().unwrap();
+    assert_eq!(
+        (base.status, base.median_samples),
+        (cpu::CpuStatus::Insufficient, 0.0)
+    );
+
+    // A bundle no longer loaded in the scenario: its sources have no current summary.
+    let mut unloaded = ten_runs(&[], environment.clone());
+    unloaded["scripts"] = json!([]);
+    let unloaded = f.analyze(&[f.profile("unloaded.json", unloaded)]).unwrap();
+    let comparison =
+        coldpath::baseline::compare(&unloaded, &serde_json::to_vec(&before).unwrap()).unwrap();
+    let rows = comparison.cpu.unwrap().sources;
+    assert_eq!(rows.len(), 3);
+    assert!(
+        rows.iter()
+            .all(|r| r.change == "inconclusive" && r.after.is_none() && r.before.is_some())
+    );
+
+    // A window only the baseline has is named, not dropped silently.
+    let windows = f
+        .analyze(&[f.profile("windows.json", two_windows())])
+        .unwrap();
+    let comparison =
+        coldpath::baseline::compare(&unloaded, &serde_json::to_vec(&windows).unwrap()).unwrap();
+    assert!(comparison.warnings.iter().any(|w| w
+        == "Baseline CPU scenario \"open\" has a action window that the current profile lacks."));
 
     // Different throttling makes every row inconclusive, with a warning.
     let throttled = f
@@ -613,6 +653,29 @@ fn cli_writes_cpu_reports_and_exports_profiles_as_evidence() {
     let replayed: Value =
         serde_json::from_slice(&fs::read(f.0.join("replay.json")).unwrap()).unwrap();
     assert_eq!(replayed["cpu"], report["cpu"]);
+    // Evidence exported before profiles existed has no `profile` option.
+    let plain = run(&["--dir", ".", "--export", "plain"]);
+    assert!(
+        plain.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
+    let path = f.0.join("plain/manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert!(
+        manifest["invocation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("profile")
+            .is_some()
+    );
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let replay = run(&["--replay", "plain"]);
+    assert!(
+        replay.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
     let excerpt = run(&[
         "--dir",
         ".",
@@ -638,4 +701,55 @@ fn cli_writes_cpu_reports_and_exports_profiles_as_evidence() {
             .any(|file| file["role"] == "profile")
     );
     assert_eq!(manifest["invocation"]["profile"], json!([]));
+}
+
+#[test]
+fn evidence_keeps_unselected_bundles_that_profiles_reference() {
+    let f = three_sources();
+    f.write("other.js", "zz");
+    let mut profile = two_windows();
+    profile["scripts"].as_array_mut().unwrap().push(json!({
+        "path": "other.js", "sha256": sha256(b"zz"), "sourceMapSha256": null,
+        "topLevel": {"load": cell(&[1; 4], &[10.0; 4]), "action": cell(&[0; 4], &[0.0; 4])},
+        "functions": []
+    }));
+    f.profile("open.json", profile);
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let export = run(&[
+        "--dir",
+        ".",
+        "app.js",
+        "--profile",
+        "open.json",
+        "--json",
+        "r.json",
+        "--export",
+        "evidence",
+    ]);
+    assert!(
+        export.status.success(),
+        "{}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&export.stderr)
+            .contains("skipped profile data for unselected file: other.js")
+    );
+    assert!(f.0.join("evidence/tree/other.js").is_file());
+    let replay = run(&["--replay", "evidence", "--json", "replay.json"]);
+    assert!(
+        replay.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    let read = |name: &str| -> Value {
+        serde_json::from_slice(&fs::read(f.0.join(name)).unwrap()).unwrap()
+    };
+    assert_eq!(read("replay.json")["cpu"], read("r.json")["cpu"]);
 }
