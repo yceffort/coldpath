@@ -120,7 +120,7 @@ Profile the baseline and the current build on the same machine in one session, b
 
 ### In CI
 
-Comparisons are meaningful within one job: build the base and the pull request, profile both on that runner, and pass the profiles to both analyses. With the [GitHub Action](../README.md#github-action), list the profile files in `args` and use `base-directory`; the comment then includes CPU changes. The same `args` run in the base checkout, so its profiles must be at the same relative paths there. A `baseline` report from another run carries profiles from another machine, so its CPU rows are inconclusive. Runners are noisier than a workstation (see below); `--runs 20` narrows the spread.
+Comparisons are meaningful within one job: build the base and the pull request, profile both on that runner, and pass the profiles to both analyses. With the [GitHub Action](../README.md#github-action), list the profile files in `args` and use `base-directory`; the comment then includes CPU changes. The same `args` run in the base checkout, so its profiles must be at the same relative paths there. A `baseline` report from another run carries profiles from another machine, so its CPU rows are inconclusive. Runners are noisier than a workstation (see below); `--runs 20` narrows the spread. GitHub's macOS runners are virtual machines whose profiler sampled every 0.5 to 1.3 ms instead of 100 µs, a third to an eighth as often as a Linux runner, so far fewer sources reach 10 samples per run there; profile on Linux runners.
 
 ## How the defaults were chosen
 

@@ -99,10 +99,14 @@ await coldpath(
 )
 const report = await read('demo.json')
 const window = (scenario, name) => report.cpu.scenarios.find((s) => s.scenario === scenario).windows.find((w) => w.window === name)
-assert(
-  window('initial', 'load').sources.some((row) => row.status === 'measured'),
-  'page load has measurable sources',
-)
+// Whether a demo source clears 10 samples per run depends on the machine: GitHub's macOS runner VMs sampled
+// every 0.5 to 1.3 ms instead of 100 µs. Samples still reach format.js, and every status follows its samples.
+const format = window('initial', 'load').sources.find((row) => row.source.endsWith('src/format.js'))
+assert(format?.medianSamples > 0, 'page load samples reach format.js')
+for (const scenario of report.cpu.scenarios)
+  for (const {sources, topLevel, other} of scenario.windows)
+    for (const row of [...sources, ...topLevel, ...other])
+      assert.equal(row.status, row.medianSamples >= report.cpu.minSamples ? 'measured' : 'insufficient', row.source ?? row.path ?? row.name)
 // ReportChart.jsx runs for microseconds: shown, but never as a reliable (or zero) cost.
 const chart = window('open-report', 'action').sources.find((row) => row.source.endsWith('src/ReportChart.jsx'))
 assert(!chart || chart.status === 'insufficient')
@@ -122,7 +126,7 @@ try {
   await detail.getByRole('heading', {name: 'CPU self time'}).waitFor()
   const item = detail.locator('.facts div').filter({hasText: 'open-report, action window'})
   assert.match(await item.locator('dd').textContent(), /^(Insufficient samples|No function samples)$/)
-  // A measured source: the Intl formatter in format.js during page load.
+  // The Intl formatter in format.js during page load, shown as its status says.
   await page.getByRole('button', {name: 'All bundles', exact: true}).click()
   await page
     .locator('#rows button')
@@ -137,8 +141,13 @@ try {
     .filter({hasText: /^format\.js$/})
     .click()
   const load = detail.locator('.facts div').filter({hasText: 'initial, load window'})
-  assert.match(await load.locator('dd').textContent(), /^\d+(\.\d+)? ms$/)
-  assert.match(await load.locator('small').textContent(), /^Q1 to Q3: .* ms to .* ms, \d+(\.\d+)? samples per run in 10 runs$/)
+  if (format.status === 'measured') {
+    assert.match(await load.locator('dd').textContent(), /^\d+(\.\d+)? ms$/)
+    assert.match(await load.locator('small').textContent(), /^Q1 to Q3: .* ms to .* ms, \d+(\.\d+)? samples per run in 10 runs$/)
+  } else {
+    assert.equal(await load.locator('dd').textContent(), 'Insufficient samples')
+    assert.match(await load.locator('small').textContent(), /^median .* ms, \d+(\.\d+)? samples? per run in 10 runs$/)
+  }
   assert.deepEqual(errors, [])
 } finally {
   await browser.close()
@@ -247,7 +256,7 @@ try {
 // ran once (garbage collection is forced). A `.JS` script is not a bundle the analyzer scans.
 const odd = join(work, 'odd')
 await mkdir(odd, {recursive: true})
-const busy = 'let x = 0; for (let i = 0; i < 2000000; i++) x = (x * 31 + i) % 1000003; globalThis.__busy = x'
+const busy = 'let x = 0; for (let i = 0; i < 20000000; i++) x = (x * 31 + i) % 1000003; globalThis.__busy = x'
 await writeFile(join(odd, 'named.js'), `function named() { ${busy} }\nnamed()\nglobalThis.named = named\n//# sourceURL=named.js\n`)
 // Blocks keep each classic script's `let` out of the shared global scope.
 await writeFile(join(odd, 'once.js'), `{ ${busy} }\n`)
@@ -299,7 +308,7 @@ await writeFile(
   join(regression, 'src', 'app.js'),
   `import {report} from './report.js'
 document.querySelector('button').addEventListener('click', () => {
-  document.querySelector('output').textContent = 'report ' + report(2000000)
+  document.querySelector('output').textContent = 'report ' + report(20000000)
 })
 `,
 )
