@@ -1,13 +1,14 @@
-// Real Chromium CPU profiles through `coldpath profile`.
+// Real Chromium CPU profiles through `coldpath profile`, joined into the report.
 import assert from 'node:assert/strict'
-import {execFile} from 'node:child_process'
+import {execFile, execFileSync} from 'node:child_process'
 import {createHash} from 'node:crypto'
 import {mkdir, readFile, rm, writeFile} from 'node:fs/promises'
 import {createServer} from 'node:http'
 import {join, relative, resolve, sep} from 'node:path'
-import {fileURLToPath} from 'node:url'
+import {fileURLToPath, pathToFileURL} from 'node:url'
 import {promisify} from 'node:util'
 
+import {chromium} from '@playwright/test'
 import {build as vite} from 'vite'
 
 import {DEFAULT_RUNS, SAMPLING_INTERVAL_US} from '../lib/profile.mjs'
@@ -16,8 +17,10 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const work = join(root, 'artifacts', 'profile')
 await rm(work, {recursive: true, force: true})
 await mkdir(work, {recursive: true})
+execFileSync('cargo', ['build', '--locked'], {cwd: root, stdio: 'inherit'})
+const env = {...process.env, COLDPATH_ANALYZER: join(root, 'target', 'debug', 'coldpath')}
 const coldpath = (...args) =>
-  promisify(execFile)(process.execPath, [join(root, 'bin', 'coldpath.mjs'), ...args], {cwd: work, maxBuffer: 64 << 20})
+  promisify(execFile)(process.execPath, [join(root, 'bin', 'coldpath.mjs'), ...args], {cwd: work, env, maxBuffer: 64 << 20})
 const read = async (path) => JSON.parse(await readFile(join(work, path), 'utf8'))
 const sha256 = (data) => createHash('sha256').update(data).digest('hex')
 
@@ -40,7 +43,7 @@ async function serve(dir, edit = (path, body) => body) {
 const scenarios = (name, config) => writeFile(join(work, name), JSON.stringify(config))
 const actions = (name) => relative(work, join(root, 'examples', 'demo', 'scenarios', name))
 
-// The README demo with the default runs and sampling interval.
+// The README demo: default runs and sampling interval, joined with coverage in one report.
 await vite({root: join(root, 'examples', 'demo'), logLevel: 'warn', build: {outDir: join(work, 'demo'), emptyOutDir: true}})
 const demo = await serve(join(work, 'demo'))
 try {
@@ -55,6 +58,7 @@ try {
     ],
   })
   await coldpath('profile', '--scenarios', 'demo.scenarios.json')
+  await coldpath('collect', '--scenarios', 'demo.scenarios.json')
 } finally {
   await demo.close()
 }
@@ -77,6 +81,65 @@ assert(
   profiles.search.scripts.some((script) => script.path.startsWith('assets/search-')),
   'the dynamically imported chunk is profiled',
 )
+
+await coldpath(
+  'analyze',
+  '--scenarios',
+  'demo.scenarios.json',
+  ...names.flatMap((name) => ['--profile', `demo-out/${name}.profile.json`]),
+  '--json',
+  'demo.json',
+  '--markdown',
+  'demo.md',
+  '--treemap',
+  'demo.html',
+)
+const report = await read('demo.json')
+const window = (scenario, name) => report.cpu.scenarios.find((s) => s.scenario === scenario).windows.find((w) => w.window === name)
+assert(
+  window('initial', 'load').sources.some((row) => row.status === 'measured'),
+  'page load has measurable sources',
+)
+// ReportChart.jsx runs for microseconds: shown, but never as a reliable (or zero) cost.
+const chart = window('open-report', 'action').sources.find((row) => row.source.endsWith('src/ReportChart.jsx'))
+assert(!chart || chart.status === 'insufficient')
+assert(report.cpu.scenarios.find((s) => s.scenario === 'open-report').bundles.some((path) => path.startsWith('assets/index-')))
+const markdown = await readFile(join(work, 'demo.md'), 'utf8')
+assert.match(markdown, /## CPU self time/)
+assert.match(markdown, /### CPU: open-report, action window/)
+
+const browser = await chromium.launch({headless: true})
+try {
+  const page = await browser.newPage({viewport: {width: 1440, height: 1100}})
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.goto(pathToFileURL(join(work, 'demo.html')).href)
+  await page.locator('#action-list button').filter({hasText: 'ReportChart.jsx'}).filter({hasText: 'open-report'}).click()
+  const detail = page.locator('#file')
+  await detail.getByRole('heading', {name: 'CPU self time'}).waitFor()
+  const item = detail.locator('.facts div').filter({hasText: 'open-report, action window'})
+  assert.match(await item.locator('dd').textContent(), /^(Insufficient samples|Not sampled)$/)
+  // A measured source: the Intl formatter in format.js during page load.
+  await page.getByRole('button', {name: 'All bundles', exact: true}).click()
+  await page
+    .locator('#rows button')
+    .filter({hasText: /^assets\/index-/})
+    .click()
+  await page
+    .locator('#rows button')
+    .filter({hasText: /^Outside analysis root .*\/examples\/demo\/src$/})
+    .click()
+  await page
+    .locator('#rows button')
+    .filter({hasText: /^format\.js$/})
+    .click()
+  const load = detail.locator('.facts div').filter({hasText: 'initial, load window'})
+  assert.match(await load.locator('dd').textContent(), /^\d+(\.\d+)? ms$/)
+  assert.match(await load.locator('small').textContent(), /^Q1 to Q3: .* ms to .* ms, \d+(\.\d+)? samples per run in 10 runs$/)
+  assert.deepEqual(errors, [])
+} finally {
+  await browser.close()
+}
 
 // Stale builds, multi-document flows, workers, and run counts.
 const stale = await serve(join(work, 'demo'), (path, body) =>
@@ -143,5 +206,5 @@ try {
 }
 
 console.log(
-  `Verified ${DEFAULT_RUNS}-run demo profiles at ${SAMPLING_INTERVAL_US} µs with load and action windows, stale-build, multi-document and run-count rejection, and the worker warning.`,
+  `Verified ${DEFAULT_RUNS}-run demo profiles at ${SAMPLING_INTERVAL_US} µs with load and action windows, stale-build, multi-document and run-count rejection, the worker warning, and CPU rows in JSON, Markdown and the treemap.`,
 )

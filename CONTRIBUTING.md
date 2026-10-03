@@ -35,12 +35,13 @@ Use Node.js 24+ and the pnpm version in `package.json`. The repository root is t
 - `scripts/verify-flows.mjs`: one scenario across a CDN script and a link navigation, including code that runs in the click just before unloading; unlisted origins stay blocked, a stale CDN copy is rejected, and the worker started by the second page stays unmeasured.
 - `scripts/verify-treemap.mjs`: checks hierarchical navigation, complete small-file access, area totals, coverage colors/data, search, package grouping, keyboard navigation, offline operation, and mobile layout.
 - `scripts/verify-comparison.mjs`: three ordered scenario colors, missing initial evidence, baseline changes, graph locations, estimates, recommendations, scenario-specific inspection, and mobile/offline behavior.
-- `scripts/verify-profile.mjs`: `coldpath profile` on the demo with the default runs and sampling interval, stale-build, multi-document, and run-count rejection, and the worker warning.
+- `scripts/verify-profile.mjs`: `coldpath profile` on the demo with the default runs and sampling interval, stale-build, multi-document, and run-count rejection, the worker warning, and CPU rows in JSON, Markdown, and the treemap.
 - `scripts/verify-inferred.mjs`: `coldpath snapshot` against a local site (load causes, an unreachable declared map), exact per-module bytes from `coldpath modules`, `coldpath label` evidence filtering against mock OpenAI-compatible and Anthropic servers, and the annotated treemap.
 - `tests/workflows.rs`: scenario ordering/Unicode partitions, missing measurements, compression fragments, graph path selection/validation, actionable evidence, and coverage budget failures.
+- `tests/cpu.rs`: profile validation and SHA-256 binding, attribution by UTF-16 function start, insufficient rows, excluded bundles, and profiles in evidence export and replay.
 - `scripts/verify-graphs.mjs`: import declaration versus usage positions, type-only syntax, source snapshot evidence, and malformed Turbopack graph rejection.
 - `scripts/verify-corpus.mjs`: real esbuild, Rollup, Vite, webpack, and Next/Turbopack builds, native Chromium recordings, independent map oracle and known-origin probes, graph location assertions, plus a source-ownership negative control. Rollup, Vite, and webpack graphs come from the `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` exports. [Published results and limitations](docs/accuracy-corpus.md).
-- `scripts/verify-package.mjs`: packs `@yceffort/coldpath` and a platform analyzer package, installs both into a fresh npm project, and runs the Rollup plugin, `coldpath graph`, `coldpath collect --scenarios`, `coldpath profile --scenarios`, and `coldpath analyze --scenarios` there.
+- `scripts/verify-package.mjs`: packs `@yceffort/coldpath` and a platform analyzer package, installs both into a fresh npm project, and runs the Rollup plugin, `coldpath graph`, `coldpath collect --scenarios`, `coldpath profile --scenarios`, and `coldpath analyze --scenarios --profile` there.
 
 Do not format or regenerate `examples/recorded/entry.js` or its map as a cosmetic edit. Their exact bytes are part of the recorded coverage's SHA-256 evidence. Source fixtures for new captures live in `fixtures/`.
 
@@ -48,7 +49,7 @@ Preserve the distinction between unobserved and unmeasured code, source verifica
 
 ## Scope
 
-The project analyzes generated JavaScript bytes. It does not currently produce Istanbul/LCOV test reports, measure CPU cost, analyze CSS ([feasibility decision](docs/css-coverage.md)) or automatically remove code. Import-path explanations require a bundler graph or esbuild metafile; source maps alone do not provide an import graph. A [local comparison](benchmarks/RESULTS.md) covers one build and explicit report workflows. There is no supported prebuilt-binary release process yet.
+The project analyzes generated JavaScript bytes. It does not currently produce Istanbul/LCOV test reports, attribute style, layout, or paint time to sources, analyze CSS ([feasibility decision](docs/css-coverage.md)) or automatically remove code. Import-path explanations require a bundler graph or esbuild metafile; source maps alone do not provide an import graph. A [local comparison](benchmarks/RESULTS.md) covers one build and explicit report workflows. There is no supported prebuilt-binary release process yet.
 
 Changes to the CLI or JSON schema should update the usage guide. Contributions are distributed under the project's MIT license.
 

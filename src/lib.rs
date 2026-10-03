@@ -3,6 +3,7 @@ pub mod attribution;
 pub mod baseline;
 pub mod ci;
 pub mod coverage;
+pub mod cpu;
 pub mod evidence;
 pub mod graph;
 pub mod input;
@@ -216,6 +217,8 @@ pub struct AnalyzeOptions {
     pub exclude: Vec<String>,
     pub compression: bool,
     pub details: bool,
+    /// `coldpath profile` files; CPU results stay apart from byte metrics.
+    pub profiles: Vec<PathBuf>,
 }
 
 impl Default for AnalyzeOptions {
@@ -231,6 +234,7 @@ impl Default for AnalyzeOptions {
             exclude: Vec::new(),
             compression: false,
             details: true,
+            profiles: Vec::new(),
         }
     }
 }
@@ -263,6 +267,9 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub import_paths: Option<Vec<metadata::ImportPath>>,
     pub recommendations: Vec<recommendations::Recommendation>,
+    /// Present only with profiles.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<cpu::CpuReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label_generator: Option<annotations::LabelGenerator>,
     /// Local files this analysis read: bundles (including excluded ones), maps, and
@@ -363,6 +370,7 @@ pub fn analyze_with_options(
 ) -> Result<Report> {
     let canonical_root = fs::canonicalize(dir)?;
     let (mut coverage, mut scenarios, warnings) = input::load(coverage_files, dir, &options.input)?;
+    let mut profiles = cpu::Profiles::load(&options.profiles)?;
     let mut seen = BTreeSet::new();
     scenarios.retain(|name| seen.insert(name.clone()));
     if !options.scenario_order.is_empty() {
@@ -446,6 +454,7 @@ pub fn analyze_with_options(
         source_compression_method: options.source_compression.then_some("isolated attributed fragments in generated order per source per bundle; non-additive estimates, not measured transfer savings"),
         import_paths: None,
         recommendations: Vec::new(),
+        cpu: None,
         label_generator: None,
         read_files: Vec::new(),
         initial_execution: BTreeMap::new(),
@@ -467,6 +476,7 @@ pub fn analyze_with_options(
         report.read_files.push(file.clone());
         if (!options.include.is_empty() && !include.is_match(&path)) || exclude.is_match(&path) {
             coverage.remove(&path);
+            profiles.exclude(&path);
             report.excluded_bundles.push(path);
             continue;
         }
@@ -517,6 +527,7 @@ pub fn analyze_with_options(
                 Vec::new(),
             )
         };
+        profiles.bind(&path, &hash, &map_hash, &text, &segments, &sources)?;
         let observations = coverage.remove(&path);
         let mut used = Vec::new();
         let mut scenario_used: BTreeMap<String, Vec<Interval>> = BTreeMap::new();
@@ -886,6 +897,26 @@ pub fn analyze_with_options(
         dir.display(),
         coverage.keys().collect::<Vec<_>>()
     );
+    // Like coverage: profiled files that exist but were not selected are skipped, missing ones fail.
+    for path in profiles.pending() {
+        let file = dir.join(&path);
+        if options.files.is_some()
+            && file.is_file()
+            && fs::canonicalize(&file).is_ok_and(|file| file.starts_with(&canonical_root))
+        {
+            report
+                .warnings
+                .push(format!("skipped profile data for unselected file: {path}"));
+            profiles.exclude(&path);
+        }
+    }
+    let pending = profiles.pending();
+    ensure!(
+        pending.is_empty(),
+        "profiles reference files missing from analysis root {}: {pending:?}; check --dir and the scenario prefix",
+        dir.display()
+    );
+    report.cpu = profiles.finish()?;
     (report.sources, report.packages) = aggregate_sources(source_counts);
     let mut copies: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     for source in report.bundles.iter().flat_map(|bundle| &bundle.sources) {

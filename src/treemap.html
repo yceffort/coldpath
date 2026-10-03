@@ -823,6 +823,7 @@
         $('color').querySelector('[value="changes"]').disabled = !report.baseline
         $('scenario').parentElement.hidden = $('initial').parentElement.hidden = !report.scenarios.length
         const number = (value) => value.toLocaleString('en-US')
+        const milliseconds = (us) => (us / 1000).toLocaleString('en-US', {maximumFractionDigits: 2}) + ' ms'
         const size = (value) =>
           value < 1000
             ? number(value) + ' B'
@@ -1291,6 +1292,36 @@
                 size(candidate.estimatedDeferrableCompression.gzipBytes) + ', ' + number(candidate.interactionOnlyBytes) + ' raw B across all bundles. Estimate requires rebuild verification.')
             }
             if (report.initialScenario) note('Estimates and review actions compare with recorded initial scenario: ' + report.initialScenario)
+            if (report.cpu) {
+              // A profiled bundle with this source and no row means its functions were not sampled.
+              const holders = report.bundles.filter((bundle) => bundle.sources.some((s) => s.source === focus.source)).map((bundle) => bundle.path)
+              const cpu = element('dl')
+              cpu.className = 'facts'
+              for (const scenario of report.cpu.scenarios) {
+                const profiled = holders.some((path) => scenario.bundles.includes(path))
+                for (const window of scenario.windows) {
+                  const row = window.sources.find((s) => s.source === focus.source)
+                  if (!row && !profiled) continue
+                  // An insufficient value is never the headline, so it cannot read as a low cost.
+                  const insufficient = row?.status === 'insufficient'
+                  const samples = (count) => number(count) + (count === 1 ? ' sample' : ' samples')
+                  const item = element('div')
+                  item.append(
+                    element('dt', scenario.scenario + ', ' + window.window + ' window'),
+                    element('dd', !row ? 'Not sampled' : insufficient ? 'Insufficient samples' : milliseconds(row.medianUs)),
+                    element('small', (!row ? '0 samples' : (insufficient ? 'median ' + milliseconds(row.medianUs) :
+                      'Q1 to Q3: ' + milliseconds(row.q1Us) + ' to ' + milliseconds(row.q3Us)) + ', ' + samples(row.medianSamples) + ' per run') +
+                      ' in ' + scenario.runs + ' runs'),
+                  )
+                  cpu.append(item)
+                }
+              }
+              if (cpu.children.length) {
+                $('file').append(element('h3', 'CPU self time'), cpu)
+                note('Median and quartiles over runs, adding up every bundle with this source. Below ' + report.cpu.minSamples +
+                  ' samples per run a value is insufficient: it is unreliable, and not sampled does not mean cheap. Code a minifier inlined counts toward the function it was inlined into.')
+              }
+            }
             $('file').append(element('h3', 'Why it is in the bundle'))
             const graph = report.importPaths?.find((row) => row.resolvedSource === focus.source)
             $('file').append(element('p', graph?.path ? 'Import path: ' + graph.path.join(' → ') +
