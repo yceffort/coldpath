@@ -1,14 +1,15 @@
 // snapshot -> modules -> label -> analyze against a local site whose chunk has no reachable map.
 import assert from 'node:assert/strict'
 import {execFile, execFileSync} from 'node:child_process'
-import {mkdir, readFile, rm, writeFile} from 'node:fs/promises'
+import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
 import {createServer} from 'node:http'
 import type {AddressInfo} from 'node:net'
+import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {promisify} from 'node:util'
 import {chromium} from 'playwright'
-import {chunkModules} from '../lib/modules.ts'
+import {chunkModules, inferModules} from '../lib/modules.ts'
 
 const run = promisify(execFile)
 assert.deepEqual(
@@ -25,6 +26,15 @@ assert.deepEqual(
   ['34'],
   'chunks joined to a prelude by a comma',
 )
+// A directory with no recognizable modules still writes an empty maps.json into a fresh output directory.
+const scopeHoisted = await mkdtemp(join(tmpdir(), 'coldpath-inferred-'))
+try {
+  await writeFile(join(scopeHoisted, 'index.js'), 'function a(){return 1}\nwindow.v=a()')
+  await inferModules({dir: scopeHoisted, out: join(scopeHoisted, 'maps/out')})
+  assert.equal(await readFile(join(scopeHoisted, 'maps/out/maps.json'), 'utf8'), '{}\n')
+} finally {
+  await rm(scopeHoisted, {recursive: true, force: true})
+}
 const root = fileURLToPath(new URL('../', import.meta.url))
 const out = join(root, 'artifacts', 'inferred')
 await rm(out, {recursive: true, force: true})

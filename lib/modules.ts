@@ -324,6 +324,7 @@ export async function inferModules({
     await writeFile(mapFile, JSON.stringify(moduleMap(code, ranges)))
     bindings[path] = relative(out, mapFile).split(sep).join('/')
   }
+  await mkdir(out, {recursive: true})
   await writeFile(join(out, 'maps.json'), JSON.stringify(bindings, null, 2) + '\n')
   if (graph) await writeFile(resolve(graph), JSON.stringify(recoveredGraph(factories), null, 2) + '\n')
   console.log(
