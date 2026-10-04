@@ -141,6 +141,23 @@ try {
     .tap({position: {x: 16, y: 10}})
   assert.equal(await touch.locator('#scope').textContent(), 'app.js')
   await touch.close()
+  // A tile shows a label only when the whole label fits. At 800 by 700 px the nested files get medium and small labels, and
+  // none may run past its tile's bottom edge.
+  const narrow = await browser.newPage({viewport: {width: 800, height: 700}})
+  narrow.on('pageerror', (error) => errors.push(error.message))
+  await narrow.goto(pathToFileURL(html).href)
+  assert.deepEqual(
+    await narrow.locator('.tile:not(.group)').evaluateAll((tiles) =>
+      tiles
+        .filter((tile) => {
+          const label = tile.firstElementChild as HTMLElement
+          return !label.hidden && label.getBoundingClientRect().bottom > tile.getBoundingClientRect().bottom + 0.5
+        })
+        .map((tile) => tile.ariaLabel),
+    ),
+    [],
+  )
+  await narrow.close()
 
   // One source shipped in two bundles: JSON counts the copies, and the treemap lists the extra bytes.
   const shared = join(output, 'shared')

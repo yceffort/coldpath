@@ -351,8 +351,9 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     fontWeight: 600,
   },
-  medium: {maxWidth: 'calc(100% - 8px)', margin: 4, paddingBlock: 3, paddingInline: 6, fontSize: 13, lineHeight: '17px'},
-  small: {maxWidth: 'calc(100% - 6px)', margin: 3, paddingBlock: 1, paddingInline: 5, fontSize: 12, lineHeight: '16px'},
+  // paddingTop and paddingBottom, like the label's: StyleX lets a longhand win over a paddingBlock set alongside it.
+  medium: {maxWidth: 'calc(100% - 8px)', margin: 4, paddingTop: 3, paddingBottom: 3, paddingInline: 6, fontSize: 13, lineHeight: '17px'},
+  small: {maxWidth: 'calc(100% - 6px)', margin: 3, paddingTop: 1, paddingBottom: 1, paddingInline: 5, fontSize: 12, lineHeight: '16px'},
   name: {display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
   wrap: {whiteSpace: 'normal', overflowWrap: 'anywhere', maxHeight: 34},
   size: {display: 'block', fontSize: 17, fontVariantNumeric: 'tabular-nums'},
