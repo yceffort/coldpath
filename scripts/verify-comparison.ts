@@ -97,7 +97,8 @@ assert.equal(data.scenarioReports[1].interactionCandidates.find((s: any) => s.so
 const top = '.tile[data-depth="0"]'
 const browser = await chromium.launch({headless: true})
 try {
-  const page = await browser.newPage({viewport: {width: 1440, height: 1100}})
+  // Without motion a view's tiles are the only tiles on the page.
+  const page = await browser.newPage({viewport: {width: 1440, height: 1100}, reducedMotion: 'reduce'})
   const errors: string[] = [],
     requests: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
@@ -109,7 +110,9 @@ try {
   assert.match(await page.locator('#later-list').innerText(), /later\.ts\s+4 B\s+Runs only in "interaction\.json": src\/later\.ts/)
   assert.match(await page.locator('#later-list').innerText(), /mixed\.ts\s+2 B\s+Runs only in "search\.json"/)
   await page.getByRole('button', {name: 'Show them'}).click()
-  assert.equal(await page.getByLabel('Color tiles by').inputValue(), 'phases')
+  // Reports open in Coverage, even with several scenarios. First observed scenario colors each tile by its largest part.
+  assert.equal(await page.getByLabel('Color tiles by').inputValue(), 'coverage')
+  await page.getByLabel('Color tiles by').selectOption('phases')
   assert.equal(await page.locator(top).evaluateAll((tiles) => tiles.reduce((n, t) => n + Number(t.dataset.bytes), 0)), 24)
   assert.equal(await page.locator(top).evaluateAll((tiles) => tiles.reduce((n, t) => n + Number(t.dataset.interactionOnly), 0)), 6)
   assert.equal(await page.locator(top).evaluateAll((tiles) => tiles.reduce((n, t) => n + Number(t.dataset.initialUnknown), 0)), 4)

@@ -209,4 +209,31 @@ export const within = (node: TreeNode | null, ancestor: TreeNode) => {
   return false
 }
 
-export const byBytes = (rows: View[]) => rows.filter((row) => row.bytes > 0).sort((a, b) => b.bytes - a.bytes)
+// What tile area shows: loaded bytes, or the bytes that never ran.
+export type Area = 'bytes' | 'unobservedBytes'
+export const byArea = (rows: View[], area: Area) => rows.filter((row) => row[area] > 0).sort((a, b) => b[area] - a[area])
+
+// One row that adds up `rows`, the children of `parent`, as the "N smaller items" tile and its view do.
+export function merge(name: string, parent: TreeNode, rows: View[]): View {
+  const row: View = {...zero(parent.first.length), name, parent, kind: 'folder', ref: parent, children: new Map()}
+  for (const each of rows) add(row, each)
+  return row
+}
+
+// The keys under `parent` of the children that hold `rows`, which compact() may have replaced with descendants.
+export function keysUnder(parent: TreeNode, rows: View[]) {
+  const keys = new Map([...parent.children].map(([key, child]) => [child, key]))
+  return rows.map((row) => {
+    let node = row.ref
+    while (node.parent !== parent) node = node.parent!
+    return keys.get(node)!
+  })
+}
+
+// The files under `rows` with the most bytes that never ran.
+export function coldest(rows: View[], count: number) {
+  const files: View[] = []
+  const walk = (row: View) => (row.kind === 'file' ? row.unobservedBytes > 0 && files.push(row) : row.children.forEach(walk))
+  rows.forEach(walk)
+  return files.sort((a, b) => b.unobservedBytes - a.unobservedBytes).slice(0, count)
+}

@@ -2,90 +2,132 @@ import * as stylex from '@stylexjs/stylex'
 import {treemapSquarify} from 'd3-hierarchy'
 import type {HierarchyRectangularNode} from 'd3-hierarchy'
 import {useLayoutEffect, useRef, useState} from 'react'
-import type {MouseEvent, PointerEvent, RefObject} from 'react'
+import type {RefObject} from 'react'
 import {classes} from '../classes.ts'
 import type {Segment} from './App.tsx'
 import {loadText, number, shortPath, signed, size} from './format.ts'
-import {byBytes, compact, within} from './model.ts'
-import type {TreeNode, View} from './model.ts'
+import {byArea, compact, keysUnder, merge, within} from './model.ts'
+import type {Area, TreeNode, View} from './model.ts'
 import {shared} from './styles.ts'
 
 type Rect = {x: number; y: number; w: number; h: number}
-// How much of a label fits: name, size, share never run, and action; name and size; name; nothing.
-type Tier = 'full' | 'medium' | 'small' | 'none'
 interface Tile extends Rect {
+  key: string
   row: View
+  // A tile that stands for several small children of `row.ref`: those rows and their keys.
+  more?: {rows: View[]; keys: string[]}
   depth: number
+  // A folder or bundle drawn as one line of header text over its own children.
   group: boolean
-  tier: Tier
-  // A medium label whose tile is tall enough wraps its name onto a second line instead of cutting it short.
-  wrap: boolean
 }
 
-// Folders and bundles with room show their contents, up to this many levels below the focus.
-const NEST_DEPTH = 3,
+const GROUP_GAP = 6,
+  TILE_GAP = 2,
   HEADER = 24,
-  PAD = 4
+  // Children with less area than this, in square pixels, are merged into one tile that zooms to them.
+  MIN_AREA = 700
 
-// The thresholds are the label heights: 104 px full, 46 px medium (63 px wrapped), 24 px small.
-const tier = (width: number, height: number): Tier =>
-  width >= 110 && height >= 112 ? 'full' : width >= 60 && height >= 46 ? 'medium' : width >= 36 && height >= 24 ? 'small' : 'none'
+// Keeps the rows, largest first, that get enough of `space` to see, and merges the rest into one "N smaller items" row.
+function visible(rows: View[], parent: TreeNode, area: Area, space: number): Pick<Tile, 'row' | 'more'>[] {
+  const total = rows.reduce((sum, row) => sum + row[area], 0)
+  let kept = 1
+  while (kept < rows.length && (rows[kept][area] / total) * space >= MIN_AREA) kept++
+  const rest = rows.slice(kept)
+  if (rest.length < 2) return rows.map((row) => ({row}))
+  return [
+    ...rows.slice(0, kept).map((row) => ({row})),
+    {row: merge(rest.length + ' smaller items', parent, rest), more: {rows: rest, keys: keysUnder(parent, rest)}},
+  ]
+}
 
-// Squarified tiles, so that small entries become boxes rather than slivers. Positions are percentages of the frame.
-function layout(items: View[], width: number, height: number) {
-  const tiles: Tile[] = [],
-    rects = new Map<TreeNode, Rect>()
-  if (!width || !height) return {tiles, rects}
-  const place = (items: View[], x0: number, y0: number, x1: number, y1: number, depth: number) => {
-    const nodes = items.map((row) => ({row, value: row.bytes, x0: 0, y0: 0, x1: 0, y1: 0}))
-    const parent = {value: items.reduce((sum, row) => sum + row.bytes, 0), children: nodes}
-    treemapSquarify(parent as unknown as HierarchyRectangularNode<unknown>, x0, y0, x1, y1)
-    for (const {row, ...box} of nodes) {
-      const tileWidth = box.x1 - box.x0,
-        tileHeight = box.y1 - box.y0
-      // Nested slivers are unreadable and unclickable; the table still lists them.
-      if (depth && (tileWidth < 4 || tileHeight < 4)) continue
-      const rect = {x: (box.x0 / width) * 100, y: (box.y0 / height) * 100, w: (tileWidth / width) * 100, h: (tileHeight / height) * 100}
-      rects.set(row.ref, rect)
-      const children =
-        row.kind !== 'file' && depth < NEST_DEPTH && tileWidth >= 110 && tileHeight >= 80
-          ? byBytes([...row.children.values()].map(compact))
-          : []
-      tiles.push({row, ...rect, depth, group: children.length > 0, tier: tier(tileWidth, tileHeight), wrap: tileHeight >= 64})
-      if (children.length) place(children, box.x0 + PAD, box.y0 + HEADER, box.x1 - PAD, box.y1 - PAD, depth + 1)
-    }
+// Squarified boxes, so that small entries become boxes rather than slivers, with `gap` pixels between them.
+function pack<T extends {row: View}>(items: T[], area: Area, x0: number, y0: number, x1: number, y1: number, gap: number) {
+  const nodes = items.map((item) => ({item, value: item.row[area], x0: 0, y0: 0, x1: 0, y1: 0}))
+  const parent = {value: nodes.reduce((sum, node) => sum + node.value, 0), children: nodes}
+  // Every box gives up half the gap on each side, so the outer edges stay flush with the area.
+  const half = gap / 2
+  treemapSquarify(parent as unknown as HierarchyRectangularNode<unknown>, x0 - half, y0 - half, x1 + half, y1 + half)
+  return nodes.map(({item, ...box}) => ({
+    ...item,
+    x: box.x0 + half,
+    y: box.y0 + half,
+    w: Math.max(0, box.x1 - box.x0 - gap),
+    h: Math.max(0, box.y1 - box.y0 - gap),
+  }))
+}
+
+// One view: the focus's children, each drawn as a tile or, with room, as a group of its own children.
+function layout(items: View[], focus: TreeNode, area: Area, width: number, height: number) {
+  const tiles: Tile[] = []
+  if (!width || !height) return tiles
+  const name = (tile: Pick<Tile, 'row' | 'more'>) => (tile.more ? 'more' : tile.row.kind + ':' + tile.row.name)
+  for (const box of pack(visible(byArea(items, area), focus, area, width * height), area, 0, 0, width, height, GROUP_GAP)) {
+    const children =
+      box.more || box.row.kind === 'file' || box.w < 150 || box.h < 110 ? [] : byArea([...box.row.children.values()].map(compact), area)
+    const group = children.length > 1
+    tiles.push({...box, key: name(box), depth: 0, group})
+    if (group)
+      for (const tile of pack(
+        visible(children, box.row.ref, area, box.w * (box.h - HEADER)),
+        area,
+        box.x,
+        box.y + HEADER,
+        box.x + box.w,
+        box.y + box.h,
+        TILE_GAP,
+      ))
+        tiles.push({...tile, key: name(box) + '/' + name(tile), depth: 1, group: false})
   }
-  place(items, 0, 0, width, height, 0)
-  return {tiles, rects}
+  return tiles
 }
 
-// The drawn box closest to `node`: itself, or the nearest ancestor that has a box.
-const box = (map: Map<TreeNode, Rect>, node: TreeNode | null) => {
-  for (; node; node = node.parent) if (map.has(node)) return map.get(node)
+// Whether a drawn tile holds a view, so that a zoom between the two starts from or lands in that tile.
+const holds = (tile: Tile, focus: TreeNode, only: string[] | null) =>
+  tile.more
+    ? (focus === tile.row.ref && only !== null && only.every((key) => tile.more!.keys.includes(key))) ||
+      tile.more.rows.some((row) => within(focus, row.ref))
+    : within(focus, tile.row.ref)
+const smallest = (tiles: Tile[], focus: TreeNode, only: string[] | null) =>
+  tiles
+    .filter((tile) => tile.w >= 1 && tile.h >= 1 && holds(tile, focus, only))
+    .reduce<Tile | undefined>((best, tile) => (best && best.w * best.h <= tile.w * tile.h ? best : tile), undefined)
+// `fit` draws the whole map inside the box; `fill` draws the box over the whole map.
+const fit = (r: Rect, width: number, height: number) => `translate(${r.x}px, ${r.y}px) scale(${r.w / width}, ${r.h / height})`
+const fill = (r: Rect, width: number, height: number) => `scale(${width / r.w}, ${height / r.h}) translate(${-r.x}px, ${-r.y}px)`
+
+// "N% never ran", or null when none of the bytes were measured.
+const share = (row: View) => {
+  const measured = row.bytes - row.unmeasuredBytes
+  return measured > 0 ? Math.round((row.unobservedBytes / measured) * 100) + '% never ran' : null
 }
-const fit = (r: Rect) => `translate(${r.x}%,${r.y}%) scale(${r.w / 100},${r.h / 100})`
-const fill = (r: Rect) => `translate(${(-100 * r.x) / r.w}%,${(-100 * r.y) / r.h}%) scale(${100 / r.w},${100 / r.h})`
 
 interface Props {
   items: View[]
   focus: TreeNode
+  // The keys of the focus's children that a "smaller items" view shows, or null for all of them.
+  only: string[] | null
+  // What the panel shows when no tile is pointed at or focused: the view's totals and its files with the most code that never ran.
+  scope: View | null
+  coldest: View[]
   hidden: boolean
   // Changes on every navigation that zooms, but not when the tree is rebuilt.
   zoom: number
+  area: Area
   changing: boolean
-  color: (row: View) => string
+  paint: (row: View) => [fill: string, ink: string]
   segments: (row: View) => Segment[]
-  onSelect: (node: TreeNode) => void
+  onSelect: (node: TreeNode, only?: string[]) => void
 }
 
-export function Treemap({items, focus, hidden, zoom, changing, color, segments, onSelect}: Props) {
-  const frameRef = useRef<HTMLDivElement>(null)
+export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area, changing, paint, segments, onSelect}: Props) {
+  const mapRef = useRef<HTMLDivElement>(null)
   const layerRef = useRef<HTMLDivElement>(null)
-  const card = useRef<CardControl>(null)
+  const leavingRef = useRef<HTMLDivElement>(null)
+  const panel = useRef<PanelControl>(null)
   const [frame, setFrame] = useState({width: 0, height: 0})
   // Layout reads the drawn size, which changes with the window, scroll bars, and visibility.
   const measure = () => {
-    const {clientWidth: width, clientHeight: height} = layerRef.current!
+    const {clientWidth: width, clientHeight: height} = mapRef.current!
     setFrame((frame) => (frame.width === width && frame.height === height ? frame : {width, height}))
   }
   useLayoutEffect(measure)
@@ -101,172 +143,172 @@ export function Treemap({items, focus, hidden, zoom, changing, color, segments, 
       removeEventListener('resize', resize)
     }
   }, [])
-  const {tiles, rects} = hidden ? {tiles: [], rects: new Map<TreeNode, Rect>()} : layout(byBytes(items), frame.width, frame.height)
+  const tiles = hidden ? [] : layout(items, focus, area, frame.width, frame.height)
 
-  // Zooming in grows the new focus from the box that was selected; zooming out shrinks the previous focus back into its box.
-  const previous = useRef({focus, rects, shown: !hidden})
+  // Zooming in grows the selected tile to fill the map while the old view moves outward and fades. Zooming out shrinks
+  // the view back into its tile. The old view stays drawn until the motion ends, and labels wait for it.
+  const [leaving, setLeaving] = useState<{zoom: number; tiles: Tile[]; rect: Rect; inward: boolean} | null>(null)
+  const previous = useRef({zoom, focus, only, tiles, shown: !hidden})
   useLayoutEffect(() => {
-    card.current?.hide()
+    panel.current?.show(null)
+    setLeaving(null)
     const before = previous.current
-    if (!before.shown || hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const zoomingIn = within(focus, before.focus)
-    const rect = zoomingIn ? box(before.rects, focus) : within(before.focus, focus) ? box(rects, before.focus) : undefined
-    if (rect)
-      layerRef.current!.animate([{transform: zoomingIn ? fit(rect) : fill(rect)}, {transform: 'none'}], {
-        duration: 320,
-        easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)',
-      })
+    if (before.zoom === zoom || !before.shown || hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const into = smallest(before.tiles, focus, only)
+    const rect = into || smallest(tiles, before.focus, before.only)
+    if (rect) setLeaving({zoom: before.zoom, tiles: before.tiles, rect, inward: Boolean(into)})
+    else layerRef.current!.animate([{opacity: 0.3}, {opacity: 1}], {duration: 180, easing: 'ease-out'})
   }, [zoom])
   useLayoutEffect(() => {
-    previous.current = {focus, rects, shown: !hidden}
+    previous.current = {zoom, focus, only, tiles, shown: !hidden}
   })
+  useLayoutEffect(() => {
+    if (!leaving) return
+    const {width, height} = frame
+    const small = fit(leaving.rect, width, height),
+      large = fill(leaving.rect, width, height)
+    const timing = {duration: 380, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)'}
+    layerRef.current!.animate([{transform: leaving.inward ? small : large}, {transform: 'none'}], timing)
+    const motion = leavingRef.current!.animate(
+      [
+        {transform: 'none', opacity: 1},
+        {transform: leaving.inward ? large : small, opacity: 0},
+      ],
+      timing,
+    )
+    motion.finished.then(
+      () => setLeaving(null),
+      () => {},
+    )
+    return () => motion.cancel()
+  }, [leaving])
 
-  // A touch has no hover: the first tap on a tile shows its card, and a second tap selects it.
-  const pointer = useRef({touch: false, shown: false})
-  const near = (element: HTMLElement) => {
-    const frame = frameRef.current!.getBoundingClientRect(),
-      tile = element.getBoundingClientRect()
-    return {x: tile.left - frame.left + 12, y: tile.top - frame.top + 12}
+  const meta = (row: View, wide: boolean) =>
+    area === 'unobservedBytes'
+      ? size(row.unobservedBytes) + ' never ran'
+      : size(row.bytes) + (wide && !changing && share(row) ? ', ' + share(row) : '')
+  const tileElement = (tile: Tile, state?: 'entering' | 'leaving') => {
+    const {key, row, more, x, y, w, h, depth, group} = tile
+    const newSource = changing && row.newSources > 0
+    const [background, color] = group ? ['transparent', 'var(--text)'] : paint(row)
+    const big = w >= 220 && h >= 100
+    const fade = state === 'leaving' ? styles.fading : state === 'entering' ? styles.waiting : styles.shown
+    // Each line is drawn only when it fits: the name needs 22 px of height and the size line 38 px.
+    const name = group || (w >= 40 && h >= 22),
+      sized = group || (w >= 64 && h >= 38)
+    return (
+      <button
+        key={key}
+        type="button"
+        data-depth={depth}
+        tabIndex={depth ? -1 : undefined}
+        data-bytes={row.bytes}
+        data-interaction-only={row.interactionOnly}
+        data-initial-unknown={row.initialUnknown}
+        data-first-observed={JSON.stringify(row.first)}
+        data-earlier-unknown={row.earlierUnknown}
+        data-change={row.change?.change || ''}
+        data-kind={more ? 'more' : row.kind}
+        style={{left: x, top: y, width: w, height: group ? HEADER : h, background, color}}
+        aria-label={row.name + ', ' + number(row.bytes) + ' bytes'}
+        onPointerEnter={() => panel.current?.show(tile)}
+        onFocus={() => panel.current?.show(tile)}
+        onClick={() => onSelect(row.ref, more?.keys)}
+        {...classes(
+          'tile' + (group ? ' group' : '') + (newSource ? ' new-source' : ''),
+          stylex.props(stylex.defaultMarker(), styles.tile, group ? styles.group : big && styles.big, newSource && styles.newSource),
+        )}
+      >
+        {name && (
+          <span {...stylex.props(group ? styles.groupLabel : styles.label, fade)}>
+            <span {...stylex.props(styles.name, group && styles.groupName, big && styles.bigName)}>{row.name}</span>
+            {sized && (
+              <span {...stylex.props(styles.meta, group && styles.groupMeta, big && styles.bigMeta)}>
+                {meta(row, group ? w > 260 : w >= 150)}
+              </span>
+            )}
+          </span>
+        )}
+      </button>
+    )
   }
-  const at = (event: PointerEvent | MouseEvent) => {
-    const frame = frameRef.current!.getBoundingClientRect()
-    return {x: event.clientX - frame.left, y: event.clientY - frame.top}
-  }
+  const layer = (tiles: Tile[], key: number, state?: 'entering' | 'leaving') => (
+    <div
+      key={key}
+      ref={state === 'leaving' ? leavingRef : layerRef}
+      inert={state === 'leaving'}
+      {...classes('layer' + (state ? ' ' + state : ''), stylex.props(styles.layer, state === 'leaving' && styles.leaving))}
+    >
+      {tiles.map((tile) => tileElement(tile, state))}
+    </div>
+  )
+  const current = layer(tiles, zoom, leaving ? 'entering' : undefined)
+  // The view that grows or shrinks into its tile is drawn on top.
+  const layers = leaving
+    ? leaving.inward
+      ? [layer(leaving.tiles, leaving.zoom, 'leaving'), current]
+      : [current, layer(leaving.tiles, leaving.zoom, 'leaving')]
+    : current
 
   return (
-    <div ref={frameRef} hidden={hidden} onPointerLeave={() => card.current?.hide()} {...stylex.props(styles.frame)}>
-      <div id="treemap" aria-label="Bundle size treemap" {...stylex.props(styles.treemap)}>
-        <div ref={layerRef} {...classes('layer', stylex.props(styles.layer))}>
-          {tiles.map(({row, x, y, w, h, depth, group, tier, wrap}) => {
-            const newSource = changing && row.newSources > 0
-            const measured = row.bytes - row.unmeasuredBytes
-            return (
-              <button
-                key={depth + '/' + row.ref.name + '/' + x + '/' + y}
-                data-depth={depth}
-                tabIndex={depth ? -1 : undefined}
-                data-bytes={row.bytes}
-                data-interaction-only={row.interactionOnly}
-                data-initial-unknown={row.initialUnknown}
-                data-first-observed={JSON.stringify(row.first)}
-                data-earlier-unknown={row.earlierUnknown}
-                data-change={row.change?.change || ''}
-                data-kind={row.kind}
-                style={{left: x + '%', top: y + '%', width: w + '%', height: h + '%', background: group ? 'var(--raised)' : color(row)}}
-                aria-label={row.name + ', ' + number(row.bytes) + ' bytes'}
-                onPointerDown={(event) => {
-                  pointer.current = {touch: event.pointerType === 'touch', shown: card.current?.showing() === row.ref}
-                }}
-                onPointerMove={(event) => {
-                  if (event.pointerType !== 'touch') card.current?.show(row, at(event))
-                }}
-                onFocus={(event) => card.current?.show(row, near(event.currentTarget))}
-                onBlur={() => card.current?.hide()}
-                onClick={(event) => {
-                  // Keyboard activation reports no clicks (`detail` 0) and always selects.
-                  if (event.detail && pointer.current.touch && !pointer.current.shown) {
-                    card.current?.show(row, near(event.currentTarget), true)
-                    return
-                  }
-                  onSelect(row.ref)
-                }}
-                {...classes(
-                  'tile' + (group ? ' group' : '') + (newSource ? ' new-source' : ''),
-                  stylex.props(stylex.defaultMarker(), styles.tile, group && styles.group, newSource && styles.newSource),
-                )}
-              >
-                {group ? (
-                  <span {...stylex.props(styles.groupLabel)}>
-                    {row.name}
-                    <strong {...stylex.props(styles.groupSize)}>{size(row.bytes)}</strong>
-                  </span>
-                ) : (
-                  <span
-                    hidden={tier === 'none'}
-                    {...stylex.props(styles.label, tier === 'medium' && styles.medium, tier === 'small' && styles.small)}
-                  >
-                    <span {...stylex.props(styles.name, tier === 'medium' && wrap && styles.wrap)}>{row.name}</span>
-                    {tier !== 'small' && (
-                      <strong {...stylex.props(styles.size, tier === 'medium' && styles.mediumSize)}>{size(row.bytes)}</strong>
-                    )}
-                    {tier === 'full' && measured > 0 && !changing && (
-                      <span {...stylex.props(styles.share)}>{Math.round((row.unobservedBytes / measured) * 100) + '% never ran'}</span>
-                    )}
-                    {tier === 'full' && (
-                      <small {...stylex.props(styles.action)}>
-                        {changing && row.newSources ? 'Contains new source' : row.kind === 'file' ? 'View details' : 'Open'}
-                      </small>
-                    )}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
+    <div hidden={hidden} {...stylex.props(styles.frame)}>
+      <div
+        id="treemap"
+        ref={mapRef}
+        aria-label="Bundle size treemap"
+        onPointerLeave={() => panel.current?.show(null)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) panel.current?.show(null)
+        }}
+        {...stylex.props(styles.treemap)}
+      >
+        {layers}
+        {area === 'unobservedBytes' && !tiles.length && <p {...stylex.props(styles.nothing)}>Nothing here never ran.</p>}
       </div>
-      <Card control={card} frameRef={frameRef} segments={segments} />
+      <Panel control={panel} scope={scope} coldest={coldest} paint={paint} segments={segments} onSelect={onSelect} />
     </div>
   )
 }
 
-interface CardControl {
-  show: (row: View, point: {x: number; y: number}, touch?: boolean) => void
-  hide: () => void
-  showing: () => TreeNode | undefined
+interface PanelControl {
+  show: (tile: Tile | null) => void
 }
 
-// The numbers behind one tile, beside the pointer, the focused tile, or the tapped tile.
-function Card({
+// Beside the map, or below it on narrow screens: the numbers of the tile under the pointer or keyboard focus, and
+// otherwise the current view's totals and its files with the most code that never ran.
+function Panel({
   control,
-  frameRef,
+  scope,
+  coldest,
+  paint,
   segments,
+  onSelect,
 }: {
-  control: RefObject<CardControl | null>
-  frameRef: RefObject<HTMLDivElement | null>
+  control: RefObject<PanelControl | null>
+  scope: View | null
+  coldest: View[]
+  paint: (row: View) => [fill: string, ink: string]
   segments: (row: View) => Segment[]
+  onSelect: (node: TreeNode) => void
 }) {
-  const [card, setCard] = useState<{row: View; x: number; y: number; touch: boolean} | null>(null)
-  const current = useRef(card)
-  current.current = card
+  const [tile, setTile] = useState<Tile | null>(null)
   useLayoutEffect(() => {
-    control.current = {
-      show: (row, {x, y}, touch = false) =>
-        setCard((card) => (card?.row === row && card.x === x && card.y === y && card.touch === touch ? card : {row, x, y, touch})),
-      hide: () => setCard(null),
-      showing: () => current.current?.row.ref,
-    }
+    control.current = {show: setTile}
   }, [])
-  if (!card) return null
-  const {row, x, y, touch} = card
-  const frame = frameRef.current!
-  const width = frame.clientWidth,
-    height = frame.clientHeight
+  const row = tile?.row || scope
+  if (!row) return null
   const parts = segments(row).filter(([bytes]) => bytes > 0)
-  const measured = row.bytes - row.unmeasuredBytes
-  // Narrow frames put the card across the full width; wider ones keep it on the roomier side of the pointer.
-  const narrow = width < 520
-  const left = x > width / 2,
-    above = y > height / 2
+  const percent = (bytes: number) => Math.round((bytes / (row.bytes || 1)) * 100) + '%'
   return (
-    <div
-      id="tile-card"
-      aria-hidden="true"
-      style={{
-        left: narrow ? 8 : x + (left ? -14 : 14),
-        top: y + (above ? -14 : 14),
-        transform: `translate(${narrow || !left ? 0 : '-100%'}, ${above ? '-100%' : 0})`,
-        ...(narrow ? {right: 8} : {}),
-      }}
-      {...stylex.props(styles.card, narrow && styles.cardNarrow)}
-    >
-      <strong {...stylex.props(styles.cardName)}>{row.name}</strong>
-      {row.kind === 'file' && row.source && <code {...stylex.props(styles.cardPath)}>{shortPath(row.source)}</code>}
-      <div {...stylex.props(styles.cardSize)}>
-        {size(row.bytes)}
-        {measured > 0 && (
-          <span {...stylex.props(styles.cardShare)}>{' · ' + Math.round((row.unobservedBytes / measured) * 100) + '% never ran'}</span>
-        )}
+    <aside id="tile-panel" {...stylex.props(styles.panel)}>
+      <div>
+        {!tile && <small {...stylex.props(styles.eyebrow)}>This view</small>}
+        <h3 {...stylex.props(styles.panelName)}>{row.name}</h3>
+        {row.kind === 'file' && row.source && <code {...stylex.props(styles.path)}>{shortPath(row.source)}</code>}
       </div>
+      <p {...stylex.props(styles.amount)}>
+        <strong {...stylex.props(styles.amountValue)}>{size(row.bytes)}</strong> {share(row) || 'not measured'}
+      </p>
       <div {...stylex.props(styles.meter)}>
         {parts.map(([bytes, color], index) => (
           <i key={index} style={{width: (bytes / (row.bytes || 1)) * 100 + '%', background: color}} {...stylex.props(styles.meterPart)} />
@@ -278,18 +320,17 @@ function Card({
             <i style={{background: color}} {...stylex.props(shared.swatch)} />
             <span {...stylex.props(styles.partLabel)}>{label}</span>
             <span {...stylex.props(styles.partValue)}>{size(bytes)}</span>
+            <span {...stylex.props(styles.partShare)}>{percent(bytes)}</span>
           </li>
         ))}
       </ul>
-      {row.label?.name && <p {...stylex.props(styles.cardNote)}>{'Inferred (AI guess): ' + row.label.name}</p>}
+      {row.label?.name && <p {...stylex.props(styles.note)}>{'Inferred (AI guess): ' + row.label.name}</p>}
       {row.label?.contents?.length ? (
-        <p {...stylex.props(styles.cardNote)}>
-          {'Inferred contents (AI guess): ' + row.label.contents.map((part) => part.name).join(', ')}
-        </p>
+        <p {...stylex.props(styles.note)}>{'Inferred contents (AI guess): ' + row.label.contents.map((part) => part.name).join(', ')}</p>
       ) : null}
-      {row.loading && <p {...stylex.props(styles.cardNote)}>{'Loaded: ' + loadText(row.loading)}</p>}
+      {row.loading && <p {...stylex.props(styles.note)}>{'Loaded: ' + loadText(row.loading)}</p>}
       {row.change && (
-        <p {...stylex.props(styles.cardNote)}>
+        <p {...stylex.props(styles.note)}>
           {'Baseline ' +
             (row.kind === 'file' ? '(source across all bundles)' : '(bundle)') +
             ': ' +
@@ -299,117 +340,149 @@ function Card({
             ' B'}
         </p>
       )}
-      <small {...stylex.props(styles.cardHint)}>
-        {(touch ? 'Tap again' : 'Select') + (row.kind === 'file' ? ' to see details' : ' to zoom in')}
-      </small>
-    </div>
+      {tile ? (
+        <small {...stylex.props(styles.hint)}>{row.kind === 'file' ? 'Select to see details' : 'Select to zoom in'}</small>
+      ) : (
+        <>
+          {coldest.length > 0 && (
+            <div>
+              <small {...stylex.props(styles.eyebrow)}>Most code that never ran</small>
+              <ul id="coldest" {...stylex.props(styles.list)}>
+                {coldest.map((file, index) => (
+                  <li key={index}>
+                    <button type="button" onClick={() => onSelect(file.ref)} {...stylex.props(styles.listButton)}>
+                      <i style={{background: paint(file)[0]}} {...stylex.props(shared.swatch)} />
+                      <span {...stylex.props(styles.listName)}>{file.name}</span>
+                      <span {...stylex.props(styles.listValue)}>{size(file.unobservedBytes)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <small {...stylex.props(styles.hint)}>Point at or focus a tile to see its numbers here.</small>
+        </>
+      )}
+    </aside>
   )
 }
 
 const motion = '@media (prefers-reduced-motion: no-preference)'
+const stack = '@media (max-width: 900px)'
+const mapHeight = {default: 'clamp(320px, 58vh, 680px)', '@media (max-width: 650px)': 380}
 const styles = stylex.create({
-  frame: {position: 'relative', marginTop: 14, marginBottom: 18},
-  treemap: {
-    position: 'relative',
-    height: {default: 'clamp(320px, 58vh, 680px)', '@media (max-width: 650px)': 380},
-    borderRadius: 8,
-    overflow: 'hidden',
+  frame: {
+    display: 'grid',
+    gridTemplateColumns: {default: 'minmax(0, 1fr) 300px', [stack]: 'minmax(0, 1fr)'},
+    gap: 16,
+    alignItems: 'start',
+    marginTop: 14,
+    marginBottom: 18,
   },
+  treemap: {position: 'relative', height: mapHeight, overflow: 'hidden'},
   layer: {position: 'absolute', inset: 0, transformOrigin: '0 0'},
+  leaving: {pointerEvents: 'none'},
   tile: {
     position: 'absolute',
-    borderWidth: 0,
-    padding: 0,
-    overflow: 'hidden',
-    borderRadius: 6,
-    boxShadow: {
-      default: 'inset 0 0 0 2px var(--panel), inset 0 0 0 3px var(--edge)',
-      ':hover': 'inset 0 0 0 2px var(--panel), inset 0 0 0 4px var(--text)',
-      ':focus-visible': 'inset 0 0 0 2px var(--panel), inset 0 0 0 4px var(--text)',
-    },
-    zIndex: {default: null, ':hover': 1, ':focus-visible': 1},
-    outline: {default: null, ':focus-visible': 'none'},
-    textAlign: 'left',
-    color: 'var(--text)',
-    transition: {default: null, [motion]: 'box-shadow 0.12s, background-color 0.12s'},
-  },
-  // A folder or bundle drawn with its contents: a title strip over nested tiles.
-  group: {display: 'flex', flexDirection: 'column'},
-  newSource: {outlineWidth: 3, outlineStyle: 'dashed', outlineColor: 'var(--accent)', outlineOffset: -7},
-  label: {
-    display: 'inline-block',
-    maxWidth: 'calc(100% - 16px)',
-    margin: 8,
-    paddingTop: 7,
-    paddingInline: 10,
-    paddingBottom: 8,
-    borderRadius: 6,
-    backgroundColor: 'var(--chip)',
-    boxShadow: '0 1px 2px rgb(0 0 0 / 0.12)',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontWeight: 600,
-  },
-  // paddingTop and paddingBottom, like the label's: StyleX lets a longhand win over a paddingBlock set alongside it.
-  medium: {maxWidth: 'calc(100% - 8px)', margin: 4, paddingTop: 3, paddingBottom: 3, paddingInline: 6, fontSize: 13, lineHeight: '17px'},
-  small: {maxWidth: 'calc(100% - 6px)', margin: 3, paddingTop: 1, paddingBottom: 1, paddingInline: 5, fontSize: 12, lineHeight: '16px'},
-  name: {display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
-  wrap: {whiteSpace: 'normal', overflowWrap: 'anywhere', maxHeight: 34},
-  size: {display: 'block', fontSize: 17, fontVariantNumeric: 'tabular-nums'},
-  mediumSize: {fontSize: 13, fontWeight: 500, color: 'var(--muted)'},
-  share: {display: 'block', fontSize: 13, fontWeight: 500, color: 'var(--muted)'},
-  action: {
-    display: 'block',
-    fontWeight: 500,
-    color: 'var(--accent)',
-    textDecoration: {default: null, [stylex.when.ancestor(':hover')]: 'underline'},
-  },
-  groupLabel: {
     display: 'flex',
-    gap: 8,
-    maxWidth: 'none',
-    margin: 0,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    borderWidth: 0,
+    borderRadius: 4,
     paddingBlock: 4,
-    paddingInline: 8,
-    borderRadius: 6,
+    paddingInline: 6,
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontWeight: 600,
+    textAlign: 'left',
+    boxShadow: {default: null, ':hover': 'inset 0 0 0 2px var(--text)', ':focus-visible': 'inset 0 0 0 3px var(--text)'},
+    outline: {default: null, ':focus-visible': 'none'},
+  },
+  big: {paddingBlock: 9, paddingInline: 11},
+  // The header line of a folder or bundle drawn with its contents.
+  group: {
+    justifyContent: 'center',
+    paddingBlock: 0,
+    paddingInline: 2,
+    boxShadow: {default: null, ':hover': null, ':focus-visible': 'inset 0 0 0 2px var(--text)'},
+  },
+  newSource: {outlineWidth: 3, outlineStyle: 'dashed', outlineColor: 'var(--accent)', outlineOffset: -7},
+  label: {display: 'flex', flexDirection: 'column', maxWidth: '100%'},
+  groupLabel: {display: 'flex', alignItems: 'baseline', gap: 8, maxWidth: '100%', fontSize: 12.5, lineHeight: '16px'},
+  name: {
+    maxWidth: '100%',
     fontSize: 12,
     lineHeight: '16px',
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
-  groupSize: {display: 'inline', fontSize: 12, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums'},
-  card: {
-    position: 'absolute',
-    zIndex: 2,
-    width: 'max-content',
-    maxWidth: 320,
-    paddingBlock: 12,
-    paddingInline: 14,
+  meta: {
+    maxWidth: '100%',
+    fontSize: 11.5,
+    lineHeight: '15px',
+    opacity: 0.85,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  bigName: {fontSize: 15, lineHeight: '20px'},
+  bigMeta: {fontSize: 13, lineHeight: '18px'},
+  groupName: {
+    minWidth: 0,
+    fontSize: 12.5,
+    fontWeight: 650,
+    textDecoration: {default: null, [stylex.when.ancestor(':hover')]: 'underline'},
+    textUnderlineOffset: 3,
+  },
+  groupMeta: {flex: 'none', fontSize: 12.5, lineHeight: '16px', opacity: 1, color: 'var(--muted)'},
+  shown: {opacity: 1, transition: {default: null, [motion]: 'opacity 160ms ease-out'}},
+  waiting: {opacity: 0},
+  fading: {opacity: 0, transition: {default: null, [motion]: 'opacity 80ms'}},
+  nothing: {position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', margin: 0, color: 'var(--muted)'},
+  panel: {
+    display: 'grid',
+    alignContent: 'start',
+    rowGap: 12,
+    minWidth: 0,
+    maxHeight: {default: mapHeight.default, [stack]: 'none'},
+    overflow: 'auto',
+    paddingBlock: 16,
+    paddingInline: 16,
     borderRadius: 10,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: 'var(--border)',
-    backgroundColor: 'var(--panel)',
-    boxShadow: '0 8px 24px rgb(0 0 0 / 0.18)',
-    pointerEvents: 'none',
+    backgroundColor: 'var(--raised)',
     fontSize: 13,
     lineHeight: 1.45,
     overflowWrap: 'anywhere',
   },
-  cardNarrow: {width: 'auto', maxWidth: 'none'},
-  cardName: {display: 'block', fontSize: 15},
-  cardPath: {display: 'block', color: 'var(--muted)', marginTop: 2},
-  cardSize: {marginTop: 6, fontWeight: 650, fontVariantNumeric: 'tabular-nums'},
-  cardShare: {fontWeight: 500, color: 'var(--muted)'},
-  meter: {display: 'flex', height: 8, marginTop: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: 'var(--unmeasured)'},
+  eyebrow: {display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase'},
+  panelName: {margin: 0, fontSize: 17, lineHeight: 1.3},
+  path: {display: 'block', marginTop: 2, color: 'var(--muted)'},
+  amount: {margin: 0, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums'},
+  amountValue: {fontSize: 24, fontWeight: 700, color: 'var(--text)'},
+  meter: {display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: 'var(--su)'},
   meterPart: {display: 'block', height: '100%'},
-  parts: {listStyle: 'none', margin: 0, marginTop: 8, padding: 0, display: 'grid', rowGap: 3},
+  parts: {listStyle: 'none', margin: 0, padding: 0, display: 'grid', rowGap: 4},
   part: {display: 'flex', alignItems: 'center', gap: 8},
   partLabel: {flex: '1', color: 'var(--muted)'},
   partValue: {fontVariantNumeric: 'tabular-nums', fontWeight: 600},
-  cardNote: {marginBlock: 6, marginInline: 0, color: 'var(--muted)'},
-  cardHint: {display: 'block', marginTop: 8, color: 'var(--accent)', fontWeight: 500},
+  partShare: {minWidth: '4ch', textAlign: 'right', color: 'var(--muted)', fontVariantNumeric: 'tabular-nums'},
+  note: {margin: 0, color: 'var(--muted)'},
+  hint: {display: 'block'},
+  list: {listStyle: 'none', marginTop: 6, marginBottom: 0, marginInline: 0, padding: 0, display: 'grid', rowGap: 2},
+  listButton: {
+    width: '100%',
+    display: 'grid',
+    gridTemplateColumns: '12px minmax(0, 1fr) auto',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 0,
+    borderRadius: 6,
+    paddingBlock: 5,
+    paddingInline: 6,
+    backgroundColor: {default: 'transparent', ':hover': 'var(--panel)'},
+    textAlign: 'left',
+  },
+  listName: {overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'},
+  listValue: {color: 'var(--muted)', fontVariantNumeric: 'tabular-nums'},
 })

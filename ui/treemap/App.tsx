@@ -4,8 +4,8 @@ import type {Report} from '../types.ts'
 import {FileDetails} from './FileDetails.tsx'
 import {Actions, Findings, Summary} from './Findings.tsx'
 import {loadText, number, phaseColor, signed, size} from './format.ts'
-import {KEYS, build, compact, filtered, keyPath, resolve} from './model.ts'
-import type {TreeNode, View} from './model.ts'
+import {KEYS, build, coldest, compact, filtered, keyPath, merge, resolve} from './model.ts'
+import type {Area, TreeNode, View} from './model.ts'
 import {shared} from './styles.ts'
 import {Treemap} from './Treemap.tsx'
 
@@ -15,15 +15,17 @@ export type Segment = [bytes: number, color: string, label: string]
 export function App({report}: {report: Report}) {
   const [search, setSearch] = useState('')
   const [group, setGroup] = useState('path')
-  const [color, setColor] = useState<ColorMode>(report.scenarios.length > 1 ? 'phases' : report.baseline ? 'changes' : 'coverage')
+  const [color, setColor] = useState<ColorMode>('coverage')
+  const [area, setArea] = useState<Area>('bytes')
   const [unloaded, setUnloaded] = useState(false)
   const [mapped, setMapped] = useState(false)
   const [sort, setSort] = useState('bytes')
   const [scenario, setScenario] = useState('')
   const [initial, setInitial] = useState(report.initialScenario || '')
   const [optionsOpen, setOptionsOpen] = useState(false)
-  // The focused node as a key path from the root; `zoom` counts navigations, which animate.
-  const [location, setLocation] = useState({path: [] as string[], zoom: 0})
+  // The focused node as a key path from the root, the keys of its children that a "smaller items" view shows, and `zoom`,
+  // which counts navigations, which animate.
+  const [location, setLocation] = useState({path: [] as string[], only: null as string[] | null, zoom: 0})
   const {root, changes} = useMemo(() => build(report, {group, scenario, initial}), [report, group, scenario, initial])
   const focus = resolve(root, location.path)
   const explorerRef = useRef<HTMLElement>(null)
@@ -33,15 +35,15 @@ export function App({report}: {report: Report}) {
     scrollToExplorer.current = false
   })
 
-  const zoom = (node: TreeNode) => setLocation((location) => ({path: keyPath(node), zoom: location.zoom + 1}))
-  const select = (node: TreeNode) => {
-    if (node === focus) return
-    history.pushState({coldpath: keyPath(node)}, '')
-    zoom(node)
+  const zoom = (node: TreeNode, only: string[] | null) => setLocation((location) => ({path: keyPath(node), only, zoom: location.zoom + 1}))
+  const select = (node: TreeNode, only?: string[]) => {
+    if (node === focus && !only && !location.only) return
+    history.pushState({coldpath: keyPath(node), only: only || null}, '')
+    zoom(node, only || null)
   }
   const popstate = useRef<(event: PopStateEvent) => void>(null)
   popstate.current = (event) => {
-    zoom(resolve(root, event.state?.coldpath || []))
+    zoom(resolve(root, event.state?.coldpath || []), event.state?.only || null)
   }
   useLayoutEffect(() => {
     const listener = (event: PopStateEvent) => popstate.current!(event)
@@ -49,7 +51,7 @@ export function App({report}: {report: Report}) {
     return () => removeEventListener('popstate', listener)
   }, [])
   // Changing what the tree holds starts again at the root.
-  const reset = () => setLocation((location) => ({path: [], zoom: location.zoom}))
+  const reset = () => setLocation((location) => ({path: [], only: null, zoom: location.zoom}))
   function choose(id: 'scenario' | 'initial' | 'color', value: string) {
     let next = {scenario, initial, color}
     next = {...next, [id]: value}
@@ -65,7 +67,8 @@ export function App({report}: {report: Report}) {
   const phases = color === 'phases' && report.scenarios.length > 0
   const initialView = color === 'initial' && Boolean(initial)
   const changing = color === 'changes' && Boolean(changes)
-  // What a tile's color shows, in the legend's words: [bytes, color, label] from the start of the tile's fill.
+  const coverage = !phases && !initialView && !changing
+  // The parts of a tile's bytes in the legend's words, [bytes, color, label], which the panel lists.
   function segments(row: View): Segment[] {
     if (changing) {
       const [color, label] =
@@ -93,19 +96,21 @@ export function App({report}: {report: Report}) {
         [row.initialUnknown, 'var(--unknown-initial)', 'Later executed · initial unmeasured'],
         ...rest,
       ]
-    return [[row.observedBytes, 'var(--observed)', 'Observed'], ...rest]
+    return [
+      [row.observedBytes, 'var(--s0)', 'Observed'],
+      [row.unobservedBytes, 'var(--s4)', 'Unobserved'],
+      [row.unmeasuredBytes, 'var(--su)', 'Unmeasured'],
+    ]
   }
-  function tileColor(row: View) {
-    const parts = segments(row)
-    if (changing) return parts[0][1]
-    let offset = 0
-    return `linear-gradient(90deg,${parts
-      .map(([value, color]) => {
-        const start = offset
-        offset += (value / (row.bytes || 1)) * 100
-        return `${color} ${start}% ${offset}%`
-      })
-      .join(',')})`
+  // A tile's fill and text color. Coverage steps through five shares of the measured bytes that never ran; the other
+  // modes take the color of the tile's largest part.
+  function paint(row: View): [string, string] {
+    if (coverage) {
+      const measured = row.bytes - row.unmeasuredBytes
+      const step = measured > 0 ? Math.min(4, Math.floor((row.unobservedBytes / measured) * 5)) : 'u'
+      return [`var(--s${step})`, `var(--t${step})`]
+    }
+    return [segments(row).reduce((largest, part) => (part[0] > largest[0] ? part : largest))[1], 'var(--text)']
   }
   function tooltip(row: View) {
     return (
@@ -141,10 +146,17 @@ export function App({report}: {report: Report}) {
   }
 
   const view = filtered(focus, {search, mapped, unloaded, recorded: report.scenarios.length > 0})
-  const items = view ? (focus.kind === 'file' ? [view] : [...view.children.values()].map(compact)) : []
+  const only = location.only && new Set(location.only)
+  const items = view
+    ? focus.kind === 'file'
+      ? [view]
+      : [...view.children].filter(([key]) => !only || only.has(key)).map(([, child]) => compact(child))
+    : []
   const order = sort as 'bytes' | 'unobservedBytes' | 'name'
   items.sort((a, b) => (order === 'name' ? 0 : b[order] - a[order]) || a.name.localeCompare(b.name))
-  const ancestors: TreeNode[] = []
+  const scopeName = location.only ? location.only.length + ' smaller items' : focus.name
+  const scope = view && (location.only ? merge(scopeName, focus, items) : view)
+  const ancestors: TreeNode[] = location.only ? [focus] : []
   for (let node = focus.parent; node; node = node.parent) ancestors.unshift(node)
   const treemapHidden = focus.kind === 'file' || items.length === 0
   const totals = report.scenarioReports.find((row) => row.scenario === scenario)?.totals || report.totals
@@ -177,11 +189,7 @@ export function App({report}: {report: Report}) {
             ['var(--unobserved)', 'No observed execution'],
             ['var(--unmeasured)', 'Unmeasured'],
           ]
-        : [
-            ['var(--observed)', 'Observed'],
-            ['var(--unobserved)', 'Unobserved'],
-            ['var(--unmeasured)', 'Unmeasured'],
-          ]
+        : [['var(--su)', 'Unmeasured']]
 
   return (
     <main {...stylex.props(styles.main)}>
@@ -326,29 +334,63 @@ export function App({report}: {report: Report}) {
             ])}
           </nav>
           <h2 id="scope" {...stylex.props(styles.scope)}>
-            {focus.name}
+            {scopeName}
           </h2>
           <span id="scope-count" aria-live="polite" {...stylex.props(styles.count)}>
             {focus.kind === 'file'
               ? size(view?.bytes || 0)
-              : items.length + (items.length === 1 ? ' entry, ' : ' entries, ') + size(view?.bytes || 0)}
+              : items.length + (items.length === 1 ? ' entry, ' : ' entries, ') + size(scope?.bytes || 0)}
           </span>
         </div>
-        <div id="legend" {...stylex.props(styles.legend)}>
-          {legends.map(([color, text]) => (
-            <span key={text} {...stylex.props(styles.legendItem)}>
-              <i style={{background: color}} {...stylex.props(shared.swatch)} />
-              {text}
+        <div {...stylex.props(styles.mapBar)}>
+          <div id="legend" {...stylex.props(styles.legend)}>
+            {coverage && (
+              <span {...stylex.props(styles.legendItem)}>
+                Never ran 0%
+                <span {...stylex.props(styles.ramp)}>
+                  {[0, 1, 2, 3, 4].map((step) => (
+                    <i key={step} style={{background: `var(--s${step})`}} {...stylex.props(shared.swatch)} />
+                  ))}
+                </span>
+                100%
+              </span>
+            )}
+            {legends.map(([color, text]) => (
+              <span key={text} {...stylex.props(styles.legendItem)}>
+                <i style={{background: color}} {...stylex.props(shared.swatch)} />
+                {text}
+              </span>
+            ))}
+          </div>
+          <div id="area" role="group" aria-label="Tile area" hidden={!report.scenarios.length} {...stylex.props(styles.label, styles.area)}>
+            Area
+            <span {...stylex.props(styles.segmented)}>
+              {(
+                [
+                  ['bytes', 'Loaded bytes'],
+                  ['unobservedBytes', 'Never-ran bytes'],
+                ] as const
+              ).map(([value, text]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={area === value}
+                  onClick={() => setArea(value)}
+                  {...stylex.props(styles.segment, area === value && styles.pressed)}
+                >
+                  {text}
+                </button>
+              ))}
             </span>
-          ))}
+          </div>
         </div>
         <p id="phase-note" {...stylex.props(shared.note, styles.wrap)}>
           {phases
-            ? 'Color shows the first recording that ran each byte. Yellow: an earlier recording did not load that file, so its first run is unknown.'
+            ? 'Each tile takes the color of the first recording that ran most of its bytes, and the panel lists every part. Yellow: an earlier recording did not load that file, so its first run is unknown.'
             : initialView
               ? 'Initial: ' +
                 initial +
-                '. Purple bytes are deferral candidates in scripts measured during initial. Yellow bytes have no initial recording. Execution evidence does not prove loading time or that removal is safe.'
+                '. Each tile takes the color of its largest part, and the panel lists every part. Purple bytes are deferral candidates in scripts measured during initial. Yellow bytes have no initial recording. Execution evidence does not prove loading time or that removal is safe.'
               : color === 'initial'
                 ? 'Choose an initial scenario to compare execution phases.'
                 : ''}
@@ -365,16 +407,21 @@ export function App({report}: {report: Report}) {
               : ''}
         </p>
         <p id="treemap-note" hidden={treemapHidden} {...stylex.props(shared.note)}>
-          Tile area is generated size. Point at or focus a tile to see its numbers, and select it to zoom in; on a touch screen, tap once
-          for the numbers and again to zoom. Use the path above or the browser's back button to zoom out.
+          Tile area is generated size, or the bytes that never ran when Area says so. Point at or focus a tile to see its numbers in the
+          panel, and select it to zoom in. Tiles too small to see are merged into one that zooms to them. Use the path above or the
+          browser's back button to zoom out.
         </p>
         <Treemap
           items={items}
           focus={focus}
+          only={location.only}
+          scope={scope}
+          coldest={coldest(items, 5)}
           hidden={treemapHidden}
           zoom={location.zoom}
+          area={area}
           changing={changing}
-          color={tileColor}
+          paint={paint}
           segments={segments}
           onSelect={select}
         />
@@ -522,18 +569,32 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
     color: 'var(--muted)',
   },
-  legend: {
+  mapBar: {
     display: 'flex',
     flexWrap: 'wrap',
-    rowGap: 6,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    rowGap: 8,
     columnGap: 16,
-    fontSize: 13,
-    color: 'var(--muted)',
     marginTop: 6,
     marginBottom: 4,
     marginInline: 0,
   },
+  legend: {display: 'flex', flexWrap: 'wrap', rowGap: 6, columnGap: 16, fontSize: 13, color: 'var(--muted)'},
   legendItem: {display: 'inline-flex', alignItems: 'center', gap: 6},
+  ramp: {display: 'inline-flex', gap: 2},
+  area: {display: 'inline-flex', alignItems: 'center', gap: 8},
+  segmented: {display: 'inline-flex', padding: 2, borderRadius: 8, backgroundColor: 'var(--border)'},
+  segment: {
+    borderWidth: 0,
+    borderRadius: 6,
+    paddingBlock: 4,
+    paddingInline: 10,
+    backgroundColor: 'transparent',
+    color: 'var(--muted)',
+    fontSize: 12.5,
+  },
+  pressed: {backgroundColor: 'var(--panel)', color: 'var(--text)', fontWeight: 600},
   wrap: {overflowWrap: 'anywhere'},
   file: {marginTop: 14, marginBottom: 18, marginInline: 0, overflowWrap: 'anywhere'},
   empty: {textAlign: 'center', padding: 40, color: 'var(--muted)'},
