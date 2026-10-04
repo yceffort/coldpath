@@ -97,8 +97,8 @@ With `--graph FILE`, it also writes a dependency graph in the [adapter format](g
 
 | Bundler | Call | Edge kind |
 | --- | --- | --- |
-| webpack | `n(id)` | `unknown` (a static import and a `require()` compile to the same call) |
-| webpack | `n.bind(n, id)`, `n.t.bind(n, id, mode)` | `dynamic` |
+| webpack | `n(id)`, including `() => n(id)` passed to `.then` on `Promise.resolve()` | `unknown` (a static import and a `require()` compile to the same call; an `import()` of a module that needs no chunk and a `require()` inside `Promise.resolve().then` do too) |
+| webpack | `n.bind(n, id)`, `n.t.bind(n, id, mode)`, or `() => n(id)` and `() => n.t(id, mode)` passed to `.then` on `n.e(chunk)` or `Promise.all([n.e(a), ...])` | `dynamic` |
 | Turbopack | `e.i(id)` / `e.r(id)` | `static` / `require` |
 | Turbopack | `e.A(id)`, and `t(id)` inside a loader's `e.v(t => ...)` | `dynamic` |
 

@@ -9,7 +9,7 @@ import {join} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {promisify} from 'node:util'
 import {chromium} from 'playwright'
-import {chunkModules, inferModules} from '../lib/modules.ts'
+import {chunkModules, factoryEdges, inferModules} from '../lib/modules.ts'
 
 const run = promisify(execFile)
 assert.deepEqual(
@@ -25,6 +25,23 @@ assert.deepEqual(
   )?.modules.map((m) => m.id),
   ['34'],
   'chunks joined to a prelude by a comma',
+)
+// webpack emits import() with arrow functions when the target supports them; a `.then` on anything else stays a plain call,
+// including `Promise.resolve()`, which a require in user code shares with import() of a module that needs no chunk.
+const arrows = chunkModules(
+  '(self.webpackChunk_t=self.webpackChunk_t||[]).push([[1],{5:(e,t,n)=>{n(6);n.e(2).then(()=>n(7));Promise.all([n.e(2),n.e(3)]).then(()=>n.t(8,23));Promise.resolve().then(()=>(n(9)));x.then(()=>n(10));Promise.all([fetch(a)]).then(()=>n(11))}}]);',
+)!.modules[0]
+assert.deepEqual(
+  factoryEdges(arrows.factory, 'webpack').map((edge) => [edge.id, edge.kind]),
+  [
+    ['6', 'unknown'],
+    ['7', 'dynamic'],
+    ['8', 'dynamic'],
+    ['9', 'unknown'],
+    ['10', 'unknown'],
+    ['11', 'unknown'],
+  ],
+  'webpack import() with arrow functions',
 )
 // A directory with no recognizable modules still writes an empty maps.json into a fresh output directory.
 const scopeHoisted = await mkdtemp(join(tmpdir(), 'coldpath-inferred-'))

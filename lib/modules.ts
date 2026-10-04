@@ -186,8 +186,8 @@ function declaresName(fn: AstNode, name: string) {
 // Literal module ids a factory loads through its own require binding. Nested functions that rebind that name,
 // such as a browserify bundle inside a module, are skipped. Offsets are UTF-16 offsets into the chunk.
 // webpack: `n(id)` (a static import or a require, indistinguishable after compilation), `n.bind(n, id)` and `n.t.bind(n, id, mode)`
-// after `n.e(chunk)` (dynamic). Turbopack: `e.i(id)` (ESM import), `e.r(id)` (require), `e.A(id)` and the loader's
-// `e.v(t => ...t(id))` (dynamic).
+// after `n.e(chunk)` (dynamic), or with arrow functions `n.e(chunk).then(() => n(id))` and `() => n.t(id, mode)`.
+// Turbopack: `e.i(id)` (ESM import), `e.r(id)` (require), `e.A(id)` and the loader's `e.v(t => ...t(id))` (dynamic).
 export function factoryEdges(factory: AstNode, bundler: string) {
   const turbopack = bundler === 'turbopack'
   const param = factory.params[turbopack ? 0 : 2]
@@ -195,13 +195,45 @@ export function factoryEdges(factory: AstNode, bundler: string) {
   const name = param.name
   const edges: FactoryEdge[] = []
   const isName = (node: AstNode) => node?.type === 'Identifier' && node.name === name
+  const isEnsure = (node: AstNode) =>
+    node?.type === 'CallExpression' &&
+    node.callee.type === 'MemberExpression' &&
+    isName(node.callee.object) &&
+    node.callee.property.name === 'e'
+  // The promise webpack's import() chains `.then` on: `n.e(chunk)` or `Promise.all([n.e(a), n.e(b)])`. Its `Promise.resolve()`
+  // for a module that needs no chunk is left out, since user code `Promise.resolve().then(() => require(x))` compiles the same.
+  const isImportPromise = (node: AstNode) =>
+    isEnsure(node) ||
+    (node?.type === 'CallExpression' &&
+      node.callee.type === 'MemberExpression' &&
+      node.callee.object.type === 'Identifier' &&
+      node.callee.object.name === 'Promise' &&
+      node.callee.property.name === 'all' &&
+      node.arguments[0]?.type === 'ArrayExpression' &&
+      node.arguments[0].elements.length > 0 &&
+      node.arguments[0].elements.every(isEnsure))
+  const deferred = new Set<AstNode>()
   const visit = (node: AstNode, loaders: Set<string>) => {
     if (node !== factory && isFunction(node) && declaresName(node, name)) return
     if (node.type === 'CallExpression') {
       const {callee, arguments: args} = node
       let id: string | null = null,
         kind: ImportKind | undefined
-      if (!turbopack && isName(callee)) [id, kind] = [literalId(args[0]), 'unknown']
+      const then = args[0]
+      if (
+        !turbopack &&
+        callee.type === 'MemberExpression' &&
+        callee.property.name === 'then' &&
+        isImportPromise(callee.object) &&
+        then?.type === 'ArrowFunctionExpression' &&
+        !then.params.length &&
+        then.body.type === 'CallExpression' &&
+        (isName(then.body.callee) ||
+          (then.body.callee.type === 'MemberExpression' && isName(then.body.callee.object) && then.body.callee.property.name === 't'))
+      ) {
+        deferred.add(then.body)
+        ;[id, kind] = [literalId(then.body.arguments[0]), 'dynamic']
+      } else if (!turbopack && isName(callee) && !deferred.has(node)) [id, kind] = [literalId(args[0]), 'unknown']
       else if (
         !turbopack &&
         callee.type === 'MemberExpression' &&
