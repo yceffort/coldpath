@@ -56,6 +56,9 @@ jobs:
       # prepack compiles bin/ and lib/ with TypeScript. Install before release-manifest edits package.json,
       # which the frozen lockfile would no longer match.
       - run: pnpm install --frozen-lockfile
+      # Compile once before anything is published, so a build failure cannot leave the platform packages on npm
+      # without the main package. npm publish compiles again in prepack.
+      - run: node --run build:js
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
