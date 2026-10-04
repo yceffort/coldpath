@@ -322,7 +322,7 @@ function split(items: Tile[], x: number, y: number, w: number, h: number, width:
   return tiles
 }
 
-// The element's client size while `active`, measured again when the window resizes.
+// The element's client size while `active`, measured after every render (the inspector and focus mode change it) and on resize.
 function useSize(active: boolean) {
   const ref = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{width: number; height: number} | null>(null)
@@ -339,7 +339,7 @@ function useSize(active: boolean) {
     measure()
     addEventListener('resize', measure)
     return () => removeEventListener('resize', measure)
-  }, [active])
+  })
   return active ? {ref, width: size?.width ?? 0, height: size?.height ?? 0} : null
 }
 

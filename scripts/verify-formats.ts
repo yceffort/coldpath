@@ -87,7 +87,19 @@ try {
   })
   await page.goto(pathToFileURL(htmlPath).href)
   await page.getByRole('button', {name: 'entry.js', exact: true}).click()
+  // The size map labels a tile only when it is drawn at least 100 by 65 px, so it must follow the file list's width.
+  const mapLabels = () =>
+    page.locator('#treemap > *').evaluateAll((tiles) =>
+      tiles.map((tile) => {
+        const {width, height} = tile.getBoundingClientRect()
+        return {shown: !(tile.firstElementChild as HTMLElement).hidden, fits: Math.round(width) >= 100 && Math.round(height) >= 65}
+      }),
+    )
+  await page.locator('#map-details > summary').click()
+  for (const {shown, fits} of await mapLabels()) assert.equal(shown, fits)
   await page.getByRole('button', {name: '../../fixtures/feature.js', exact: true}).click()
+  for (const {shown, fits} of await mapLabels()) assert.equal(shown, fits)
+  await page.locator('#map-details > summary').click()
   await page.getByLabel('Coverage state').selectOption('unobserved')
   assert.match((await page.locator('#range-count').textContent())!, /[1-9]/)
   assert.match((await page.locator('#source-title').textContent())!, /feature.js/)
