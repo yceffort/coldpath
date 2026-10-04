@@ -1,7 +1,8 @@
 import {parse} from '@babel/parser'
 import {createHash} from 'node:crypto'
 import {readFile, realpath} from 'node:fs/promises'
-import {isAbsolute, resolve, dirname, relative} from 'node:path'
+import {createRequire} from 'node:module'
+import {isAbsolute, resolve, dirname, relative, join, sep} from 'node:path'
 
 export type ImportKind = 'static' | 'dynamic' | 'require' | 'unknown'
 export type LocationEvidence = 'parsed-source' | 'plugin-input' | 'webpack-stats' | 'recovered-factory'
@@ -89,6 +90,38 @@ export function importSites(code: string, filename: string): ImportSite[] {
   return sites
 }
 
+// Node's require conditions (module-sync included) and realpath; exportedFiles covers a file the bundler chose under other conditions.
+function resolvePackage(importer: string, specifier: string) {
+  try {
+    return createRequire(importer).resolve(specifier)
+  } catch {
+    return null
+  }
+}
+
+// Every file the specifier's exports entry names under any condition, read from the package under node_modules that holds `file`.
+async function exportedFiles(file: string, specifier: string) {
+  const name = specifier.match(/^(?:@[^/]+\/)?[^/]+/)?.[0] ?? ''
+  const marker = sep + join('node_modules', name) + sep
+  const at = file.lastIndexOf(marker)
+  if (!name || at < 0) return []
+  const dir = file.slice(0, at + marker.length - 1)
+  const {exports} = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8').catch(() => '{}'))
+  const map =
+    exports && typeof exports === 'object' && !Array.isArray(exports) && Object.keys(exports)[0]?.startsWith('.') ? exports : {'.': exports}
+  const subpath = '.' + specifier.slice(name.length)
+  const leaves = (value: unknown): string[] =>
+    typeof value === 'string' ? [value] : value && typeof value === 'object' ? Object.values(value).flatMap(leaves) : []
+  return Object.entries(map)
+    .flatMap(([key, value]) => {
+      if (key === subpath) return leaves(value)
+      const [prefix, suffix] = key.split('*')
+      if (suffix === undefined || !subpath.startsWith(prefix) || !subpath.endsWith(suffix) || subpath.length < key.length - 1) return []
+      return leaves(value).map((leaf) => leaf.replaceAll('*', subpath.slice(prefix.length, subpath.length - suffix.length)))
+    })
+    .map((leaf) => resolve(dir, leaf))
+}
+
 export async function enrichLocations(graph: Graph, root: string) {
   const modules = new Map(graph.modules.map((m) => [m.id, m]))
   const byFrom = new Map<string, GraphEdge[]>()
@@ -118,18 +151,26 @@ export async function enrichLocations(graph: Graph, root: string) {
           graph.warnings.push(`No parsed import locations for ${mod.source}: ${(error as Error).message}`)
       }
     }
+    const packages = new Map<string, string | null>()
     for (const edge of edges) {
       const target = modules.get(edge.to)
       const matches: ImportSite[] = []
+      let real: string | undefined
       for (const site of sites) {
         if (edge.specifier && site.specifier === edge.specifier) {
           matches.push(site)
           continue
         }
-        if (!site.specifier.startsWith('.') || !target) continue
+        if (!target) continue
         // Resolve only to a target already established by the bundler graph.
-        const stem = resolve(root, dirname(mod!.source), site.specifier)
         const expected = resolve(root, target.source)
+        if (!site.specifier.startsWith('.')) {
+          if (!packages.has(site.specifier)) packages.set(site.specifier, resolvePackage(resolve(root, mod!.source), site.specifier))
+          real ??= await realpath(expected).catch(() => expected)
+          if (packages.get(site.specifier) === real || (await exportedFiles(real, site.specifier)).includes(real)) matches.push(site)
+          continue
+        }
+        const stem = resolve(root, dirname(mod!.source), site.specifier)
         const candidates = [
           stem,
           ...['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'].map((ext) => stem + ext),

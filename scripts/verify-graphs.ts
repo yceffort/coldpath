@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {mkdtemp, writeFile, rm} from 'node:fs/promises'
+import {mkdir, mkdtemp, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {enrichLocations, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
@@ -46,13 +46,26 @@ try {
 
   // modules.data puts static imports and require() calls in one synchronous list; the importer's source tells them apart.
   await writeFile(join(root, 'page.js'), "import {a} from './esm.js'\nconst c = require('./cjs.js')\n")
-  await writeFile(join(root, 'mixed.js'), "import 'pkg'\nrequire('./cjs.js')\n")
+  await writeFile(join(root, 'mixed.js'), "import 'pkg'\nrequire('dep')\nrequire('cond/_/x')\n")
   await writeFile(join(root, 'pure.js'), "import 'pkg'\n")
-  const names = ['page.js', 'esm.js', 'cjs.js', 'mixed.js', 'pure.js', 'pkg.js']
+  await mkdir(join(root, 'node_modules/dep'), {recursive: true})
+  await writeFile(join(root, 'node_modules/dep/index.js'), '')
+  // Node's require takes module-sync (esm); the bundler took the default (cjs) file.
+  await mkdir(join(root, 'node_modules/cond/esm'), {recursive: true})
+  await mkdir(join(root, 'node_modules/cond/cjs'), {recursive: true})
+  await writeFile(
+    join(root, 'node_modules/cond/package.json'),
+    JSON.stringify({exports: {'./_/*': {'module-sync': './esm/*.js', default: './cjs/*.cjs'}}}),
+  )
+  await writeFile(join(root, 'node_modules/cond/esm/x.js'), '')
+  await writeFile(join(root, 'node_modules/cond/cjs/x.cjs'), '')
+  const names = ['page.js', 'esm.js', 'cjs.js', 'mixed.js', 'pure.js', 'pkg.js', 'node_modules/dep/index.js', 'node_modules/cond/cjs/x.cjs']
   const sync: [number, number][] = [
     [0, 1],
     [0, 2],
     [3, 5],
+    [3, 6],
+    [3, 7],
     [4, 5],
   ]
   const block = Buffer.alloc(4 + names.length * 4 + sync.length * 4)
@@ -75,6 +88,8 @@ try {
       ['page.js', 'esm.js', 'static', 1],
       ['page.js', 'cjs.js', 'require', 2],
       ['mixed.js', 'pkg.js', 'unknown', null],
+      ['mixed.js', 'node_modules/dep/index.js', 'require', 2],
+      ['mixed.js', 'node_modules/cond/cjs/x.cjs', 'require', 3],
       ['pure.js', 'pkg.js', 'static', null],
     ],
   )
