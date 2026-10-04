@@ -43,8 +43,44 @@ try {
   const prefix = Buffer.alloc(4)
   prefix.writeUInt32BE(header.length)
   assert.throws(() => turbopackGraph(Buffer.concat([prefix, header]), root), /bounds/)
+
+  // modules.data puts static imports and require() calls in one synchronous list; the importer's source tells them apart.
+  await writeFile(join(root, 'page.js'), "import {a} from './esm.js'\nconst c = require('./cjs.js')\n")
+  await writeFile(join(root, 'mixed.js'), "import 'pkg'\nrequire('./cjs.js')\n")
+  await writeFile(join(root, 'pure.js'), "import 'pkg'\n")
+  const names = ['page.js', 'esm.js', 'cjs.js', 'mixed.js', 'pure.js', 'pkg.js']
+  const sync: [number, number][] = [
+    [0, 1],
+    [0, 2],
+    [3, 5],
+    [4, 5],
+  ]
+  const block = Buffer.alloc(4 + names.length * 4 + sync.length * 4)
+  block.writeUInt32BE(names.length)
+  names.forEach((_, from) => block.writeUInt32BE(sync.filter(([f]) => f <= from).length, 4 + from * 4))
+  sync.forEach(([, to], i) => block.writeUInt32BE(to, 4 + names.length * 4 + i * 4))
+  const syncHeader = Buffer.from(
+    JSON.stringify({
+      modules: names.map((name) => ({ident: `[project]/${name} [client] (ecmascript)`, path: `[project]/${name}`})),
+      module_dependencies: {offset: 0, length: block.length},
+      async_module_dependencies: {offset: 0, length: 0},
+    }),
+  )
+  const syncPrefix = Buffer.alloc(4)
+  syncPrefix.writeUInt32BE(syncHeader.length)
+  const turbopack = await enrichLocations(turbopackGraph(Buffer.concat([syncPrefix, syncHeader, block]), root), root)
+  assert.deepEqual(
+    turbopack.edges.map((e) => [names[Number(e.from)], names[Number(e.to)], e.kind, e.location?.line ?? null]),
+    [
+      ['page.js', 'esm.js', 'static', 1],
+      ['page.js', 'cjs.js', 'require', 2],
+      ['mixed.js', 'pkg.js', 'unknown', null],
+      ['pure.js', 'pkg.js', 'static', null],
+    ],
+  )
+  assert.match(turbopack.warnings.join('\n'), /1 synchronous Turbopack edges/)
   console.log(
-    'Verified import declaration/use distinction, type-only imports, source snapshot evidence and malformed native graph rejection.',
+    'Verified import declaration/use distinction, type-only imports, source snapshot evidence, malformed native graph rejection and Turbopack import/require separation.',
   )
 } finally {
   await rm(root, {recursive: true, force: true})

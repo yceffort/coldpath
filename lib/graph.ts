@@ -98,6 +98,7 @@ export async function enrichLocations(graph: Graph, root: string) {
   }
   const cache = new Map<string, {sites: ImportSite[]; hash: string}>()
   const result: GraphEdge[] = []
+  let unclassified = 0
   for (const [from, edges] of byFrom) {
     const mod = modules.get(from)
     let sites: ImportSite[] = []
@@ -137,12 +138,23 @@ export async function enrichLocations(graph: Graph, root: string) {
         if (candidates.includes(expected)) matches.push(site)
         else if ((await realpath(stem).catch(() => null)) === expected) matches.push(site)
       }
-      const compatible = matches.filter((site) => edge.kind === 'unknown' || site.kind === edge.kind)
+      // modules.data lists static imports and require() calls together as synchronous edges (see turbopackGraph).
+      const synchronous = graph.bundler === 'turbopack' && edge.kind === 'static'
+      const compatible = matches.filter(
+        (site) => edge.kind === 'unknown' || site.kind === edge.kind || (synchronous && site.kind === 'require'),
+      )
       if (compatible.length) for (const site of compatible) result.push({...edge, ...site})
-      else result.push(edge)
+      else if (synchronous && sites.some((site) => site.kind === 'require')) {
+        result.push({...edge, kind: 'unknown'})
+        unclassified++
+      } else result.push(edge)
     }
   }
   graph.edges = result
+  if (unclassified)
+    graph.warnings.push(
+      `${unclassified} synchronous Turbopack edges come from files that also call require() and match neither an import nor a require; they are marked unknown.`,
+    )
   return graph
 }
 
@@ -292,6 +304,7 @@ export function turbopackGraph(bytes: Buffer, root: string, environment = 'clien
   )
   const ids = new Set(modules.map((m) => m.id)),
     edges: GraphEdge[] = []
+  // module_dependencies holds static imports and require() calls alike; enrichLocations tells them apart from source.
   for (const [field, kind] of [
     ['module_dependencies', 'static'],
     ['async_module_dependencies', 'dynamic'],
