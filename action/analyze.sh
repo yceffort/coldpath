@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the analyzer on the base checkout (optional) and the pull request build.
 set -eo pipefail
-bin="$RUNNER_TEMP/coldpath-target/release/coldpath"
+bin="$ANALYZER"
 out="$RUNNER_TEMP/coldpath/out"
 mkdir -p "$out"
 

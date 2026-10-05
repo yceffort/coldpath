@@ -37,3 +37,27 @@ jobs:
             initial
           max-added-bytes: 1024
           max-added-unobserved-bytes: 1024
+
+  prebuilt:
+    name: Analyze with the prebuilt analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      # The latest release: a release commit's own version is published only after its tag.
+      - id: release
+        run: echo "version=$(npm view @yceffort/coldpath version)" >> "$GITHUB_OUTPUT"
+      - uses: ./
+        with:
+          analyzer: npm
+          analyzer-version: ${{ steps.release.outputs.version }}
+          args: |
+            --dir
+            examples/recorded
+            --coverage
+            examples/recorded/initial.coverage.json
+            --coverage
+            examples/recorded/interaction.coverage.json
+            --initial-scenario
+            initial
+          comment: 'false'
+          artifact-name: coldpath-report-prebuilt
