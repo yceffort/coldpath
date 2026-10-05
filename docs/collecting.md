@@ -11,7 +11,7 @@ npx playwright install chromium
 
 Use Node.js 22.12+. On Linux CI, `npx playwright install --with-deps chromium` also installs Chromium's system dependencies. Playwright is an optional peer dependency of `coldpath`; only collection needs it.
 
-coldpath launches Chromium only in headless mode, so `npx playwright install --only-shell chromium` (Playwright 1.49 or newer) is enough and skips the full browser. Behind a proxy, or on a network that blocks Playwright's download CDN, use Playwright's [proxy](https://playwright.dev/docs/browsers#install-behind-a-firewall-or-a-proxy) and [mirror](https://playwright.dev/docs/browsers#download-from-artifact-repository) settings. A mirror must serve the same paths as the CDN, which `npx playwright install --dry-run --only-shell chromium` prints.
+coldpath launches Chromium only in headless mode, so `npx playwright install --only-shell chromium` (Playwright 1.49 or newer) is enough and skips the full browser. Behind a proxy, or on a network that blocks Playwright's download CDN, use Playwright's [proxy](https://playwright.dev/docs/browsers#install-behind-a-firewall-or-a-proxy) and [mirror](https://playwright.dev/docs/browsers#download-from-artifact-repository) settings. A mirror must serve the same paths as the CDN, which `npx playwright install --dry-run --only-shell chromium` prints. To record with a browser that is already installed instead, pass [`--browser-channel` or `--browser-path`](#device-throttling-and-authenticated-state).
 
 Build with source maps, serve that build, and keep the exact generated files available on disk. For example, if `/assets/app.js` is served from `dist/assets/app.js`:
 
@@ -97,8 +97,12 @@ By default the collector uses a 1280x900 desktop viewport with no throttling and
 | `--latency-ms N --download-kbps N --upload-kbps N` | `network: {latencyMs, downloadKbps, uploadKbps}` | Chromium network emulation. All three values are required. |
 | `--cpu-slowdown N` | `cpuSlowdown` | Chromium CPU throttling rate (`1` is no slowdown). |
 | `--storage-state FILE` | `storageState` | A Playwright [storage state](https://playwright.dev/docs/auth) file with cookies and local storage, for example from a logged-in session. |
+| `--browser-channel NAME` | `browserChannel` | An installed browser by [Playwright channel](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge), such as `chrome` or `msedge`, instead of Playwright's Chromium. |
+| `--browser-path FILE` | `browserPath` | An installed Chromium-based browser executable. Cannot be combined with `--browser-channel`. |
 
 Explicit options override the device's values. The envelope's `environment` records the device name, viewport, effective user agent, scale factor, mobile and touch flags, network and CPU settings, and whether a storage state was loaded. It never records the storage state's contents or path. Keep storage state files out of version control; they usually contain session cookies.
+
+`environment.browser` records the browser version; `browserChannel` records the channel, and `browserPath: true` only that an executable was named, not its path. Recordings from different browser builds can differ in which code runs and how long it takes, so compare recordings made with the same browser.
 
 Throttling changes which code runs only when the application reacts to timing (for example, timeouts or network-dependent fallbacks). Coverage from throttled recordings is still not a performance measurement; record [CPU profiles](cpu.md) for that.
 

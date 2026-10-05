@@ -5,7 +5,7 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises'
 import {dirname, join, resolve} from 'node:path'
 import {pathToFileURL} from 'node:url'
 
-import {loadPlaywright} from './collect.ts'
+import {launchOptions, loadPlaywright} from './collect.ts'
 
 const EMPTY_MAP = JSON.stringify({version: 3, sources: [], names: [], mappings: ''})
 
@@ -32,14 +32,22 @@ export async function snapshot({
   waitMs = 5000,
   actions,
   scenario,
+  browserPath,
+  browserChannel,
 }: {
   url?: string
   out?: string
   waitMs?: number
   actions?: string
   scenario?: string
+  browserPath?: string
+  browserChannel?: string
 }) {
-  assert(url && out, 'Usage: coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME]')
+  assert(
+    url && out,
+    'Usage: coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [--browser-path FILE | --browser-channel NAME]',
+  )
+  const launch = launchOptions({browserPath, browserChannel})
   assert(scenario === undefined || /^[\w.-]+$/.test(scenario), '--scenario may contain letters, digits, _, . and -')
   assert(Number.isSafeInteger(waitMs) && waitMs >= 0, '--wait-ms must be a nonnegative integer')
   const target = new URL(url)
@@ -50,7 +58,7 @@ export async function snapshot({
     assert.equal(typeof action, 'function', '--actions must default-export a function')
   }
   const {chromium} = loadPlaywright('snapshot')
-  const browser = await chromium.launch()
+  const browser = await chromium.launch(launch)
   const entries: {url: string; source: string; functions: unknown[]}[] = [],
     documents = new Map<string | undefined, Promise<string | undefined>>(),
     requests = new Map<string, {initiator: string; startMs: number; documentURL: string}>()

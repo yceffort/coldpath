@@ -458,6 +458,11 @@ try {
     cli('snapshot', '--url', origin + '/', '--out', flows, '--wait-ms', '500', '--scenario', 'third'),
     /dyn\.js differs from the copy an earlier snapshot saved/,
   )
+  // An installed browser by Playwright channel; an unknown channel fails in Playwright's launch.
+  const channel = join(out, 'channel')
+  await cli('snapshot', '--url', origin + '/', '--out', channel, '--wait-ms', '0', '--browser-channel', 'chromium')
+  assert(JSON.parse(await readFile(join(channel, 'coverage.json'), 'utf8')).length)
+  await assert.rejects(cli('snapshot', '--url', origin + '/', '--out', channel, '--browser-channel', 'no-such-channel'), /no-such-channel/)
   console.log('verified snapshot, module recovery, labeling and annotated reports')
 } finally {
   site.close()

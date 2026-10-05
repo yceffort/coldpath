@@ -146,7 +146,7 @@ function reduce(profile: CpuProfile, scripts: Map<string, Script>): Window {
 async function measure(entry: Entry) {
   const {setup} = entry
   const {target, root, action, waitMs, localPath} = setup
-  const browser = await setup.playwright.chromium.launch({headless: true})
+  const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
     const {context, page, cdp, errors, blocked} = await open(browser, setup)
     // page.goto commits the first document. Downloads and 204 responses commit none.
