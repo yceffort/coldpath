@@ -254,6 +254,7 @@ interface WebpackStatsModule {
   name?: string
   nameForCondition?: string | null
   issuer?: string | null
+  orphan?: boolean
   reasons?: WebpackStatsReason[]
   modules?: WebpackStatsModule[]
 }
@@ -268,11 +269,16 @@ export function webpackGraph(stats: WebpackStats, root: string): Graph {
   const compilation = (stats: WebpackStats) => {
     const prefix = `${compilationIndex++}:`
     const all: WebpackStatsModule[] = []
+    const parents = new Map<WebpackStatsModule, WebpackStatsModule>()
     const entries = new Set<string | undefined>()
     const flatten = (modules: WebpackStatsModule[] | undefined, parent?: WebpackStatsModule) => {
       for (const mod of modules || []) {
+        // orphanModules lists modules outside every chunk, such as concatenated inner modules,
+        // which also appear nested in their concatenated module.
+        if (!parent && mod.orphan) continue
         if (mod.identifier) {
           all.push(mod)
+          if (parent) parents.set(mod, parent)
           if (
             (mod.reasons || []).some((r) => r.type === 'entry') ||
             (parent && mod.nameForCondition && entries.has(parent.identifier) && mod.nameForCondition === parent.nameForCondition)
@@ -292,8 +298,13 @@ export function webpackGraph(stats: WebpackStats, root: string): Graph {
         entry: entries.has(mod.identifier),
         emittedBytes: null,
       })
-      for (const reason of mod.reasons || []) {
-        if (reason.active === false || !known.has(reason.moduleIdentifier)) continue
+      // A concatenated module holds the incoming reasons of its root module.
+      const parent = parents.get(mod)
+      const isRoot = parent && mod.nameForCondition && mod.nameForCondition === parent.nameForCondition
+      const reasons = [...(mod.reasons || []), ...((isRoot && parent.reasons) || [])].filter(
+        (reason) => reason.active !== false && known.has(reason.moduleIdentifier),
+      )
+      for (const reason of reasons) {
         const kind = /import\(\)/.test(reason.type!)
           ? 'dynamic'
           : /harmony/.test(reason.type!)
@@ -312,9 +323,10 @@ export function webpackGraph(stats: WebpackStats, root: string): Graph {
           ...(loc ? {location: {line: Number(loc[1]), column: Number(loc[2]) + 1}, locationEvidence: 'webpack-stats' as const} : {}),
         })
       }
-      // Concatenated inner modules have no reasons. Stats still records their
-      // first issuer; syntax enrichment can prove its import kind and position.
-      if (known.has(mod.issuer) && !(mod.reasons || []).some((r) => r.moduleIdentifier === mod.issuer && r.active !== false)) {
+      // Stats without orphanModules drop the reasons of concatenated inner modules. Their first issuer is then
+      // the only evidence, though webpack can record a different one for an identical build. Syntax
+      // enrichment can prove its import kind and position.
+      if (known.has(mod.issuer) && !reasons.length) {
         graph.edges.push({from: prefix + mod.issuer, to: prefix + mod.identifier, kind: 'unknown'})
       }
     }

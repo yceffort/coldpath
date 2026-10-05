@@ -102,23 +102,80 @@ try {
   await mkdir(cached)
   await writeFile(join(cached, 'entry.js'), "import {draw} from './chart.js'\ndraw()\n")
   await writeFile(join(cached, 'chart.js'), 'export function draw() {}\n')
-  const buildGraph = async () => {
+  const buildGraph = async (context = cached) => {
     const compiler = webpack({
       mode: 'production',
-      context: cached,
+      context,
       entry: './entry.js',
-      cache: {type: 'filesystem', cacheDirectory: join(cached, '.cache')},
-      output: {path: join(cached, 'dist')},
+      cache: {type: 'filesystem', cacheDirectory: join(context, '.cache')},
+      output: {path: join(context, 'dist')},
       plugins: [new ColdpathGraphPlugin()],
     })
     await new Promise((resolve, reject) =>
       compiler.run((error, stats) => (error || stats!.hasErrors() ? reject(error || new Error(stats!.toString())) : resolve(stats))),
     )
     await new Promise<void>((resolve, reject) => compiler.close((error) => (error ? reject(error) : resolve())))
-    return readFile(join(cached, 'dist/coldpath.graph.json'), 'utf8')
+    return readFile(join(context, 'dist/coldpath.graph.json'), 'utf8')
   }
   const cold = await buildGraph()
   assert.equal(await buildGraph(), cold, 'modules restored from the webpack cache must stay in the graph')
+
+  // A concatenated inner module keeps every importer, not only webpack's first issuer, which can differ
+  // between identical builds (#44).
+  const shared = join(root, 'shared')
+  await mkdir(shared)
+  await writeFile(join(shared, 'entry.js'), "import {a} from './a.js'\nimport {b} from './b.js'\nconsole.log(a(), b())\n")
+  await writeFile(join(shared, 'a.js'), "import {value} from './shared.js'\nexport const a = () => value\n")
+  await writeFile(join(shared, 'b.js'), "import {value} from './shared.js'\nexport const b = () => value + 1\n")
+  await writeFile(join(shared, 'shared.js'), 'export const value = Math.random()\n')
+  const concatenated = JSON.parse(await buildGraph(shared))
+  const file = (id: string) =>
+    concatenated.modules
+      .find((m: {id: string}) => m.id === id)
+      .source.split('/')
+      .at(-1)
+  const importers = concatenated.edges.filter((e: {to: string}) => file(e.to) === 'shared.js').map((e: {from: string}) => file(e.from))
+  assert.deepEqual([...new Set(importers)].sort(), ['a.js', 'b.js'])
+  const sources = concatenated.modules.map((m: {source: string}) => m.source)
+  assert.equal(new Set(sources).size + 1, sources.length, 'only the concatenated module repeats its root source')
+
+  // Top-level orphans are left out; a concatenated module's root takes its reasons; the issuer is used only
+  // when stats carry no reasons (saved without orphanModules).
+  const orphans = (rootIssuer: string, innerReasons: object[]) =>
+    webpackGraph(
+      {
+        modules: [
+          {identifier: 'main', nameForCondition: '/p/main.js', reasons: [{type: 'entry'}]},
+          {identifier: 'other', nameForCondition: '/p/other.js', reasons: [{type: 'entry'}]},
+          {
+            identifier: 'concat',
+            nameForCondition: '/p/page.js',
+            reasons: ['main', 'other'].map((from) => ({moduleIdentifier: from, type: 'import()', userRequest: './page.js'})),
+            modules: [
+              {identifier: 'page', nameForCondition: '/p/page.js', issuer: rootIssuer, reasons: []},
+              {identifier: 'inner', nameForCondition: '/p/inner.js', issuer: 'page', reasons: innerReasons},
+            ],
+          },
+          {identifier: 'inner', nameForCondition: '/p/inner.js', orphan: true, reasons: []},
+        ],
+      },
+      '/p',
+    )
+  const edgeList = (graph: ReturnType<typeof webpackGraph>) => graph.edges.map((e) => `${e.from} ${e.kind} ${e.to}`).sort()
+  const inner = [{moduleIdentifier: 'page', type: 'harmony side effect evaluation', userRequest: './inner.js'}]
+  assert.deepEqual(edgeList(orphans('main', inner)), edgeList(orphans('other', inner)))
+  assert.deepEqual(edgeList(orphans('main', inner)), [
+    '0:main dynamic 0:concat',
+    '0:main dynamic 0:page',
+    '0:other dynamic 0:concat',
+    '0:other dynamic 0:page',
+    '0:page static 0:inner',
+  ])
+  assert.deepEqual(
+    orphans('main', inner).modules.map((m) => m.id),
+    ['0:main', '0:other', '0:concat', '0:page', '0:inner'],
+  )
+  assert(edgeList(orphans('main', [])).includes('0:page unknown 0:inner'))
   console.log(
     'Verified import declaration/use distinction, type-only imports, source snapshot evidence, malformed native graph rejection, Turbopack import/require separation and webpack graphs from a warm cache.',
   )
