@@ -14,7 +14,7 @@ This skill covers apps whose build you control. For a site you cannot build (no 
 ## Requirements
 
 - Node.js 24 or newer, macOS or Linux (Windows is not supported).
-- `@yceffort/coldpath` 0.3.2 or newer in devDependencies (earlier versions report nearly every later-only static import as `split-review`). Collection also needs Playwright and Chromium. Before adding `playwright` to `package.json`, tell the user; `npm install --no-save playwright` is the non-invasive option for a one-off analysis. Then run `npx playwright install chromium`.
+- `@yceffort/coldpath` 0.3.2 or newer in devDependencies (earlier versions report nearly every later-only static import as `split-review`). Collection also needs Playwright and Chromium. Before adding `playwright` to `package.json`, tell the user; `npm install --no-save playwright` is the non-invasive option for a one-off analysis. Then run `npx playwright install chromium`; coldpath launches only headless Chromium, so `--only-shell` (Playwright 1.49 or newer) is enough.
 - The npm package ships only the README. Full docs live at <https://github.com/yceffort/coldpath/tree/main/docs>. `npx coldpath --help` lists every analyzer flag.
 
 ## Workflow
@@ -204,5 +204,6 @@ Budget flags: `--max-bytes`, `--max-unobserved-bytes`, `--max-unmeasured-bytes`,
 | an action times out | the awaited element never appeared; check the selector against the real UI. Popups: `page.waitForEvent('popup')` |
 | everything `[unmapped]` | source maps are disabled or not next to the bundles |
 | `requires Playwright` | install Playwright and Chromium as in Requirements |
+| `npx playwright install` cannot reach the download CDN | use Playwright's [proxy or mirror settings](https://playwright.dev/docs/browsers#install-behind-a-firewall-or-a-proxy) or tell the user; do not place browser files by hand, since Playwright's install layout is internal |
 | `graph has no entry modules`, or a webpack graph far smaller than the build | with `@yceffort/coldpath` 0.6.1 or earlier, the webpack plugin leaves out modules restored from webpack's persistent cache (`.next/cache` in Next.js). Upgrade, or delete the cache and rebuild |
 | worker code always unmeasured | workers are not recorded; not a bug in the app |
