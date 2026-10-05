@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
-import {mkdir, mkdtemp, writeFile, rm} from 'node:fs/promises'
+import {mkdir, mkdtemp, readFile, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import webpack from 'webpack'
 import {enrichLocations, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
+import ColdpathGraphPlugin from '../lib/webpack.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'coldpath-graphs-'))
 try {
@@ -94,8 +96,31 @@ try {
     ],
   )
   assert.match(turbopack.warnings.join('\n'), /1 synchronous Turbopack edges/)
+
+  // A warm persistent cache (such as .next/cache) restores modules without building them.
+  const cached = join(root, 'cached')
+  await mkdir(cached)
+  await writeFile(join(cached, 'entry.js'), "import {draw} from './chart.js'\ndraw()\n")
+  await writeFile(join(cached, 'chart.js'), 'export function draw() {}\n')
+  const buildGraph = async () => {
+    const compiler = webpack({
+      mode: 'production',
+      context: cached,
+      entry: './entry.js',
+      cache: {type: 'filesystem', cacheDirectory: join(cached, '.cache')},
+      output: {path: join(cached, 'dist')},
+      plugins: [new ColdpathGraphPlugin()],
+    })
+    await new Promise((resolve, reject) =>
+      compiler.run((error, stats) => (error || stats!.hasErrors() ? reject(error || new Error(stats!.toString())) : resolve(stats))),
+    )
+    await new Promise<void>((resolve, reject) => compiler.close((error) => (error ? reject(error) : resolve())))
+    return readFile(join(cached, 'dist/coldpath.graph.json'), 'utf8')
+  }
+  const cold = await buildGraph()
+  assert.equal(await buildGraph(), cold, 'modules restored from the webpack cache must stay in the graph')
   console.log(
-    'Verified import declaration/use distinction, type-only imports, source snapshot evidence, malformed native graph rejection and Turbopack import/require separation.',
+    'Verified import declaration/use distinction, type-only imports, source snapshot evidence, malformed native graph rejection, Turbopack import/require separation and webpack graphs from a warm cache.',
   )
 } finally {
   await rm(root, {recursive: true, force: true})

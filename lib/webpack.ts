@@ -24,6 +24,7 @@ export default class ColdpathGraphPlugin {
         reasons: true,
         children: true,
         ids: true,
+        cachedModules: true,
         groupModulesByType: false,
         groupModulesByPath: false,
         groupModulesByAttributes: false,

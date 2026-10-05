@@ -35,12 +35,12 @@ export default {
 }
 ```
 
-To export from saved stats instead, include modules, nested modules, reasons, and child compilations. Avoid grouped or truncated module lists. With the webpack Node API, write the result of:
+To export from saved stats instead, include modules (with those restored from a persistent cache), nested modules, reasons, and child compilations. Avoid grouped or truncated module lists. With the webpack Node API, write the result of:
 
 ```js
 stats.toJson({
   all: false, modules: true, nestedModules: true, reasons: true, children: true,
-  ids: true, groupModulesByType: false, groupModulesByPath: false,
+  ids: true, cachedModules: true, groupModulesByType: false, groupModulesByPath: false,
   groupModulesByAttributes: false, modulesSpace: Infinity, nestedModulesSpace: Infinity,
 })
 ```
