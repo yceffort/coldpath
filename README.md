@@ -316,7 +316,7 @@ Use the same analysis-root convention and bundle selection for both builds. Repo
 
 ### GitHub Action
 
-The repository is also a composite action. It builds the analyzer, runs your analyzer options on a checkout of the base branch and on the pull request build, uploads the report JSON, Markdown summary, and HTML treemap as an artifact, and creates or updates a single pull request comment. Budget failures fail the job after the comment is written.
+The repository is also a composite action. It builds the analyzer (or downloads a prebuilt one), runs your analyzer options on a checkout of the base branch and on the pull request build, uploads the report JSON, Markdown summary, and HTML treemap as an artifact, and creates or updates a single pull request comment. Budget failures fail the job after the comment is written.
 
 ```yaml
 permissions:
@@ -343,7 +343,7 @@ steps:
       max-added-unobserved-bytes: 10000
 ```
 
-`args` takes one argument per line and must not include output options. Use `baseline` instead of `base-directory` to pass a report you already have, for example one downloaded from the base branch's last run. The comment is found by a marker and must be written by a bot account (the default `GITHUB_TOKEN` is). Pull requests from forks get a read-only token, so the comment step only warns there; the artifact is still uploaded. The runner needs Rust (`cargo`). [`pr-report.yml`](.github/workflows/pr-report.yml) runs the action on this repository's recorded example.
+`args` takes one argument per line and must not include output options. Use `baseline` instead of `base-directory` to pass a report you already have, for example one downloaded from the base branch's last run. The comment is found by a marker and must be written by a bot account (the default `GITHUB_TOKEN` is). Pull requests from forks get a read-only token, so the comment step only warns there; the artifact is still uploaded. By default the action builds the analyzer from its own checkout, so the runner needs Rust (`cargo`) and access to crates.io. `analyzer: npm` instead downloads the prebuilt analyzer published on npm for the action's version (`analyzer-version` picks another), which needs Node.js and access to the npm registry or your configured mirror. Any other `analyzer` value is the path of an analyzer binary that the workflow already provides. [`pr-report.yml`](.github/workflows/pr-report.yml) runs the action on this repository's recorded example, both ways.
 
 The comment includes CPU changes when `args` lists `--profile` files and both builds were profiled in the same job. `args` runs in both checkouts, so write each build's profiles to the same relative paths in its own checkout; a missing profile fails the base analysis. Profiles from another runner, such as those in a downloaded `baseline`, are reported as inconclusive: two runners measured the same build 22 to 32% apart. Profile on a Linux runner: GitHub's macOS runners sampled a third to an eighth as often, so far fewer sources reach 10 samples per run. See [CPU cost in CI](docs/cpu.md#in-ci).
 

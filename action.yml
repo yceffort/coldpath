@@ -31,6 +31,12 @@ inputs:
   artifact-name:
     description: Name of the uploaded artifact with the report JSON, Markdown summary, and HTML treemap.
     default: coldpath-report
+  analyzer:
+    description: Where the analyzer comes from. `source` builds it with cargo, `npm` downloads the prebuilt binary published on npm, and any other value is the path of an analyzer binary.
+    default: source
+  analyzer-version:
+    description: The published version to download when `analyzer` is `npm`. Defaults to this action's version.
+    default: ''
 outputs:
   exit-code:
     description: Analyzer exit code (0 success, 2 budget exceeded).
@@ -41,13 +47,18 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Build the analyzer
+    - name: Provide the analyzer
+      id: analyzer
       shell: bash
-      run: cargo build --locked --release --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" --target-dir "$RUNNER_TEMP/coldpath-target"
+      env:
+        INPUT_ANALYZER: ${{ inputs.analyzer }}
+        INPUT_ANALYZER_VERSION: ${{ inputs.analyzer-version }}
+      run: bash "$GITHUB_ACTION_PATH/action/analyzer.sh"
     - name: Analyze
       id: analyze
       shell: bash
       env:
+        ANALYZER: ${{ steps.analyzer.outputs.path }}
         INPUT_ARGS: ${{ inputs.args }}
         INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         INPUT_BASE_DIRECTORY: ${{ inputs.base-directory }}
