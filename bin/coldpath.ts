@@ -17,9 +17,10 @@ const usage = `Usage:
   coldpath collect --url URL --dir DIRECTORY --out FILE [--prefix PATH] [--scenario NAME] [--actions FILE] [--wait-ms N]
                    [--cdn-prefix URL]... [--allow-origin ORIGIN]... [--device NAME] [--viewport WxH] [--user-agent UA] [--device-scale-factor N] [--mobile] [--touch]
                    [--latency-ms N --download-kbps N --upload-kbps N] [--cpu-slowdown N] [--storage-state FILE]
+                   [--browser-path FILE | --browser-channel NAME]
   coldpath profile --scenarios coldpath.scenarios.json [--runs N]
   coldpath graph --format esbuild|webpack|turbopack --input FILE --root BUILD_ROOT --out graph.json [--environment client|server|all]
-  coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME]
+  coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [--browser-path FILE | --browser-channel NAME]
   coldpath modules --dir DIRECTORY --out MAP_DIRECTORY [--maps-json maps.json]... [--chunks] [--graph FILE]
   coldpath label --report report.json --out labels.json [--mode identify|describe] [--provider anthropic|openai]
                  [--model NAME] [--base-url URL] [--top N] [--lang LANGUAGE]
@@ -61,6 +62,8 @@ async function main() {
         'upload-kbps': {type: 'string'},
         'cpu-slowdown': {type: 'string'},
         'storage-state': {type: 'string'},
+        'browser-path': {type: 'string'},
+        'browser-channel': {type: 'string'},
       },
     })
     if (values.scenarios) {
@@ -98,6 +101,8 @@ async function main() {
         ? ({latencyMs: number('latency-ms'), downloadKbps: number('download-kbps'), uploadKbps: number('upload-kbps')} as Network)
         : undefined,
       storageState: values['storage-state'],
+      browserPath: values['browser-path'],
+      browserChannel: values['browser-channel'],
     })
     return 0
   }
@@ -131,9 +136,16 @@ async function main() {
         'wait-ms': {type: 'string'},
         actions: {type: 'string'},
         scenario: {type: 'string'},
+        'browser-path': {type: 'string'},
+        'browser-channel': {type: 'string'},
       },
     })
-    await snapshot({...values, waitMs: values['wait-ms'] === undefined ? undefined : Number(values['wait-ms'])})
+    await snapshot({
+      ...values,
+      waitMs: values['wait-ms'] === undefined ? undefined : Number(values['wait-ms']),
+      browserPath: values['browser-path'],
+      browserChannel: values['browser-channel'],
+    })
     return 0
   }
   if (command === 'modules') {

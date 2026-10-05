@@ -8,6 +8,8 @@ import {join} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {promisify} from 'node:util'
 
+import {chromium} from '@playwright/test'
+
 const run = promisify(execFile)
 const root = fileURLToPath(new URL('../', import.meta.url))
 const artifacts = join(root, 'artifacts', 'environment')
@@ -93,6 +95,10 @@ try {
   assert.equal(desktop.environment.isMobile, false)
   assert.equal(desktop.environment.storageState, false)
   assert.equal(desktop.environment.network, null)
+  assert(
+    !('browserChannel' in desktop.environment) && !('browserPath' in desktop.environment),
+    'unused options must not change the environment',
+  )
   assert(desktop.probe.waitMs < 400, `unthrottled request took ${desktop.probe.waitMs}ms`)
 
   const phone = await record('phone', [
@@ -124,7 +130,26 @@ try {
   const wide = await record('wide', ['--device', 'Pixel 7', '--viewport', '1024x768'])
   assert.deepEqual(wide.calls, {mobileLayout: 0, desktopLayout: 1, signedIn: 0, signedOut: 1})
   assert.deepEqual(wide.environment.viewport, {width: 1024, height: 768})
+
+  // An installed browser by Playwright channel or executable path. Only the path's use is recorded, not the path.
+  const channel = await record('channel', ['--browser-channel', 'chromium'])
+  assert.deepEqual(channel.calls, desktop.calls)
+  assert.equal(channel.environment.browserChannel, 'chromium')
+  const executable = chromium.executablePath()
+  const path = await record('path', ['--browser-path', executable])
+  assert.deepEqual(path.calls, desktop.calls)
+  assert.equal(path.environment.browserPath, true)
+  assert(!JSON.stringify(path.environment).includes(executable), 'the browser path must not be recorded')
+  await assert.rejects(
+    record('both', ['--browser-channel', 'chromium', '--browser-path', executable]),
+    /--browser-path and --browser-channel cannot be combined/,
+  )
+  // Both reach Playwright's launch: a missing executable and an unknown channel fail there.
+  await assert.rejects(record('missing', ['--browser-path', join(artifacts, 'missing-browser')]), /missing-browser/)
+  await assert.rejects(record('unknown', ['--browser-channel', 'no-such-channel']), /no-such-channel/)
 } finally {
   await new Promise((resolve) => server.close(resolve))
 }
-console.log('Verified device emulation, viewport overrides, network throttling, CPU slowdown metadata and saved authenticated state.')
+console.log(
+  'Verified device emulation, viewport overrides, network throttling, CPU slowdown metadata, saved authenticated state and installed browsers.',
+)

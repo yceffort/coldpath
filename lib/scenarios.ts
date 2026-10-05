@@ -24,6 +24,7 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
     assert(url, `${file}: scenario ${scenario.name} needs "url" (or a top-level "url")`)
     const option = (key: string) => scenario[key] ?? config[key]
     const storageState = option('storageState')
+    const browserPath = option('browserPath')
     return {
       device: option('device'),
       viewport: option('viewport'),
@@ -36,6 +37,8 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
       cdnPrefixes: option('cdnPrefixes'),
       allowOrigins: option('allowOrigins'),
       storageState: storageState && resolve(base, storageState),
+      browserPath: browserPath && resolve(base, browserPath),
+      browserChannel: option('browserChannel'),
       url: config.url ? new URL(url, config.url).href : url,
       dir: resolve(base, config.dir),
       prefix: scenario.prefix ?? config.prefix,

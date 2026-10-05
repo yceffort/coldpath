@@ -27,7 +27,7 @@ Use `--url-prefix http://` for plain HTTP sites. Both prefixes may be passed.
 
 ## snapshot
 
-`coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME]` loads the page once in Chromium with precise V8 coverage, waits for `load` plus `--wait-ms` (default 5,000), runs an optional action module (the same `{page, context}` interface as [`collect`](collecting.md#custom-interactions)), and writes:
+`coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [--browser-path FILE | --browser-channel NAME]` loads the page once in Chromium (or an installed browser, as in [`collect`](collecting.md#device-throttling-and-authenticated-state)) with precise V8 coverage, waits for `load` plus `--wait-ms` (default 5,000), runs an optional action module (the same `{page, context}` interface as [`collect`](collecting.md#custom-interactions)), and writes:
 
 - `files/<host>/<path>`: the exact text of every external `.js`, `.mjs`, and `.cjs` script. Coverage is Playwright-format with source text, so the analyzer compares each file with what was recorded.
 - `coverage.json`: the recording. Inline scripts are left out.

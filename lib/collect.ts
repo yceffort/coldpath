@@ -34,6 +34,8 @@ export interface CaptureOptions {
   network?: Network
   cpuSlowdown?: number
   storageState?: string
+  browserPath?: string
+  browserChannel?: string
 }
 
 type Playwright = typeof import('playwright')
@@ -58,6 +60,12 @@ export function loadPlaywright(command = 'collect'): {chromium: Playwright['chro
 
 const digest = (data: string | Buffer) => createHash('sha256').update(data).digest('hex')
 
+// Playwright's own Chromium unless an installed browser is named.
+export function launchOptions({browserPath, browserChannel}: {browserPath?: string; browserChannel?: string}) {
+  assert(!(browserPath && browserChannel), '--browser-path and --browser-channel cannot be combined')
+  return {headless: true, executablePath: browserPath && resolve(browserPath), channel: browserChannel}
+}
+
 // Validates the scenario options that collect and profile share.
 export async function prepare(
   {
@@ -78,6 +86,8 @@ export async function prepare(
     network,
     cpuSlowdown,
     storageState,
+    browserPath,
+    browserChannel,
   }: CaptureOptions,
   command: string,
 ) {
@@ -117,6 +127,7 @@ export async function prepare(
     }
   }
   assert(cpuSlowdown === undefined || (Number.isFinite(cpuSlowdown) && cpuSlowdown >= 1), '--cpu-slowdown must be a number >= 1')
+  const launch = launchOptions({browserPath, browserChannel})
   const playwright = loadPlaywright(command)
   let emulation: BrowserContextOptions = {viewport: {width: 1280, height: 900}}
   if (device) {
@@ -156,6 +167,9 @@ export async function prepare(
     network,
     cpuSlowdown,
     storageState,
+    browserPath,
+    browserChannel,
+    launch,
     playwright,
     emulation,
     localPath,
@@ -227,10 +241,13 @@ export async function verifyScript(cdp: CDPSession, root: string, scriptId: stri
 
 // Capture settings recorded in coverage and profile files.
 export async function environment(browser: Browser, page: Page, setup: Setup) {
-  const {playwright, device, emulation, network, cpuSlowdown, storageState, remotes, origins} = setup
+  const {playwright, device, emulation, network, cpuSlowdown, storageState, remotes, origins, browserPath, browserChannel} = setup
   const exceptions = [remotes.length && '--cdn-prefix', origins.length && '--allow-origin'].filter(Boolean)
   return {
     browser: browser.version(),
+    // Only when set, like allowedOrigins below. The executable's path can name the user, so only its use is recorded.
+    ...(browserChannel ? {browserChannel} : {}),
+    ...(browserPath ? {browserPath: true} : {}),
     node: process.version,
     platform: process.platform,
     playwright: playwright.version,
@@ -258,7 +275,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
   const setup = await prepare(options, 'collect')
   const {target, root, action, waitMs, scenario, localPath} = setup
 
-  const browser = await setup.playwright.chromium.launch({headless: true})
+  const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
     const {context, page, cdp, errors, blocked, requests} = await open(browser, setup, {beforeunload: true})
 
