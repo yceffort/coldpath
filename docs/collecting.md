@@ -11,6 +11,8 @@ npx playwright install chromium
 
 Use Node.js 24+. On Linux CI, `npx playwright install --with-deps chromium` also installs Chromium's system dependencies. Playwright is an optional peer dependency of `coldpath`; only collection needs it.
 
+coldpath launches Chromium only in headless mode, so `npx playwright install --only-shell chromium` (Playwright 1.49 or newer) is enough and skips the full browser. Behind a proxy, or on a network that blocks Playwright's download CDN, use Playwright's [proxy](https://playwright.dev/docs/browsers#install-behind-a-firewall-or-a-proxy) and [mirror](https://playwright.dev/docs/browsers#download-from-artifact-repository) settings. A mirror must serve the same paths as the CDN, which `npx playwright install --dry-run --only-shell chromium` prints.
+
 Build with source maps, serve that build, and keep the exact generated files available on disk. For example, if `/assets/app.js` is served from `dist/assets/app.js`:
 
 ```sh
