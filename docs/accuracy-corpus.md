@@ -1,6 +1,6 @@
 # Real-build accuracy corpus
 
-Snapshot measured locally on macOS with Node 24.20.0 on 2026-10-04. Reproduce with `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, and `pnpm test:corpus`. CI repeats the corpus on Linux/macOS with Node 24. These checks measure agreement with an independent source-map oracle and known-origin literal probes, not exact semantic ownership of every minified byte.
+Snapshot measured locally on macOS with Node 24.20.0 on 2026-10-04. Reproduce with `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, and `pnpm test:corpus`. CI repeats the corpus on Linux/macOS with Node 24 and on Linux with Node 22.12. These checks measure agreement with an independent source-map oracle and known-origin literal probes, not exact semantic ownership of every minified byte.
 
 | Build | Version | Generated B | Source-map oracle disagreement | Known-origin probe errors | Scenario/bundle checks |
 | --- | --- | ---: | ---: | ---: | ---: |

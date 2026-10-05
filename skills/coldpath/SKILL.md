@@ -13,7 +13,7 @@ This skill covers apps whose build you control. For a site you cannot build (no 
 
 ## Requirements
 
-- Node.js 24 or newer, macOS or Linux (Windows is not supported).
+- Node.js 22.12 or newer, macOS or Linux (Windows is not supported).
 - `@yceffort/coldpath` 0.3.2 or newer in devDependencies (earlier versions report nearly every later-only static import as `split-review`). Collection also needs Playwright and Chromium. Before adding `playwright` to `package.json`, tell the user; `npm install --no-save playwright` is the non-invasive option for a one-off analysis. Then run `npx playwright install chromium`; coldpath launches only headless Chromium, so `--only-shell` (Playwright 1.49 or newer) is enough.
 - The npm package ships only the README. Full docs live at <https://github.com/yceffort/coldpath/tree/main/docs>. `npx coldpath --help` lists every analyzer flag.
 
