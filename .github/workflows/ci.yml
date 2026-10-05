@@ -48,15 +48,22 @@ jobs:
           --json artifacts/example.json --html artifacts/example.html
 
   browser:
-    name: Browser and real-build corpus (${{ matrix.os }})
+    name: Browser and real-build corpus (${{ matrix.os }}, Node ${{ matrix.node }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        node: ["24"]
+        include:
+          # The minimum in package.json engines. Node strips types from scripts/ by default only from 22.18.
+          - os: ubuntu-latest
+            node: "22.12.0"
+            node-options: --experimental-strip-types
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
       NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: ${{ matrix.node-options }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -67,10 +74,18 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+        if: matrix.node == '24'
       - run: pnpm typecheck
+        if: matrix.node == '24'
       # The analyzer embeds the committed report pages, so they must match a fresh build of ui/.
       - run: pnpm build:ui && git diff --exit-code -- src/ui
+        if: matrix.node == '24'
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:browser
-      - run: pnpm test:corpus
-      - run: pnpm test:package
+      # pnpm itself needs a newer Node, so the tests run through node --run on the matrix version.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: matrix.node != '24'
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --run test:browser
+      - run: node --run test:corpus
+      - run: node --run test:package
