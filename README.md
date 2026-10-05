@@ -255,7 +255,7 @@ Scenario order is explicit, not inferred from timestamps. Standard coverage expo
 
 ## Collect a browser scenario
 
-The optional collector requires Node.js 24+, Playwright, and Chromium:
+The optional collector requires Node.js 22.12+, Playwright, and Chromium:
 
 ```sh
 npm install --save-dev playwright
@@ -362,7 +362,7 @@ pnpm test:corpus
 pnpm test:package
 ```
 
-CI runs Rust tests on Linux and macOS, checks the minimum Rust version on Linux, and exercises the HTML report, input adapters, collector, CPU profiles, and five real bundler builds in Chromium on both platforms. See [CONTRIBUTING.md](CONTRIBUTING.md) for test boundaries and fixtures.
+CI runs Rust tests on Linux and macOS, checks the minimum Rust version on Linux, and exercises the HTML report, input adapters, collector, CPU profiles, and five real bundler builds in Chromium on both platforms, and repeats those browser checks on Linux with the minimum supported Node.js. See [CONTRIBUTING.md](CONTRIBUTING.md) for test boundaries and fixtures.
 
 A [reproducible comparison](benchmarks/RESULTS.md) and [explorer measurements](benchmarks/MVP.md) record performance and compatibility on one saved build. These are development measurements, not a general performance ranking or proof of attribution accuracy across bundlers.
 
