@@ -432,6 +432,60 @@ fn graph_source_hashes_reject_stale_locations_and_keep_compact_exports_compact()
 }
 
 #[test]
+fn why_accepts_a_unique_path_suffix_and_lists_candidates_otherwise() {
+    let f = Fixture::new();
+    // A pnpm monorepo app: packages live in a store two levels above the graph root.
+    let pnpm =
+        |version: &str| format!("../../node_modules/.pnpm/pkg@{version}/node_modules/pkg/index.js");
+    f.write("app.js", "abcdefghijkl");
+    f.map(&["src/main.js", &pnpm("1.0.0"), &pnpm("2.0.0")]);
+    f.write(
+        "graph.json",
+        &json!({"schemaVersion":1,"bundler":"webpack","modules":[
+        {"id":"main","source":"src/main.js","entry":true},
+        {"id":"one","source":pnpm("1.0.0")},{"id":"two","source":pnpm("2.0.0")}],"edges":[
+        {"from":"main","to":"one","kind":"static"},{"from":"main","to":"two","kind":"dynamic"}]})
+        .to_string(),
+    );
+    let why = |query: &str| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args([
+                "--dir",
+                ".",
+                "--graph",
+                "graph.json",
+                "--graph-root",
+                ".",
+                "--why",
+                query,
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = why("pkg@2.0.0/node_modules/pkg/index.js");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains(&format!("src/main.js --Dynamic--> {}", pnpm("2.0.0")))
+    );
+    // Ambiguous suffixes and unmatched paths list the graph inputs to pass instead.
+    for query in ["node_modules/pkg/index.js", "lib/index.js"] {
+        let output = why(query);
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&pnpm("1.0.0")) && stderr.contains(&pnpm("2.0.0")),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
 fn label_evidence_is_checked_per_copy_of_a_differently_minified_source() {
     let f = Fixture::new();
     for (file, text) in [("a.js", "var q=1;"), ("b.js", "var z=1;")] {

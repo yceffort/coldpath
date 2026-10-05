@@ -9,7 +9,7 @@ coldpath --dir dist --graph artifacts/graph.json --graph-root . \
   --json artifacts/actions.json --markdown artifacts/actions.md
 ```
 
-`--graph-root` is the bundler's project/working directory, defaulting to CWD. It is independent of the analysis root. Export and analyze from the same source revision and build. `--why src/chart.js` prints the chosen chain and available one-based locations. The treemap links the same evidence to source tiles and review suggestions.
+`--graph-root` is the bundler's project/working directory, defaulting to CWD. It is independent of the analysis root. Export and analyze from the same source revision and build. `--why src/chart.js` prints the chosen chain and available one-based locations. It takes a graph or report source as printed, or trailing path segments that match exactly one graph source, so `node_modules/chart.js/dist/chart.js` also finds a copy in a pnpm store such as `../../node_modules/.pnpm/chart.js@4.4.0/node_modules/chart.js/dist/chart.js`. When several sources or none match, the error lists the candidates. The treemap links the same evidence to source tiles and review suggestions.
 
 ## esbuild
 

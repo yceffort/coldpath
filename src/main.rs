@@ -731,13 +731,7 @@ fn main() -> Result<()> {
         );
     }
     if let Some(source) = &args.why {
-        let row = report
-            .import_paths
-            .as_ref()
-            .unwrap()
-            .iter()
-            .find(|row| row.source == *source || row.resolved_source.as_ref() == Some(source))
-            .ok_or_else(|| anyhow::anyhow!("no matched graph input {source}"))?;
+        let row = why_row(report.import_paths.as_ref().unwrap(), source, args.limit)?;
         status!(
             "\nImport path ({} graph): {}",
             row.graph_format,
@@ -798,6 +792,55 @@ fn main() -> Result<()> {
         std::process::exit(2);
     }
     Ok(())
+}
+
+/// An exact graph or report source, else the one graph source ending with the given path
+/// segments, so `node_modules/pkg/file.js` finds a package in a pnpm store.
+fn why_row<'a>(
+    rows: &'a [coldpath::metadata::ImportPath],
+    query: &str,
+    limit: usize,
+) -> Result<&'a coldpath::metadata::ImportPath> {
+    if let Some(row) = rows
+        .iter()
+        .find(|row| row.source == query || row.resolved_source.as_deref() == Some(query))
+    {
+        return Ok(row);
+    }
+    let ending = |suffix: &str| {
+        rows.iter()
+            .map(|row| row.source.as_str())
+            .filter(|source| *source == suffix || source.ends_with(&format!("/{suffix}")))
+            .collect::<BTreeSet<_>>()
+    };
+    let matches = ending(query);
+    let (mut message, candidates) = match matches.len() {
+        1 => {
+            let source = *matches.first().unwrap();
+            return Ok(rows.iter().find(|row| row.source == source).unwrap());
+        }
+        0 => {
+            let name = query.rsplit('/').next().unwrap_or(query);
+            let named = ending(name);
+            let message = if named.is_empty() {
+                format!("no matched graph input {query}")
+            } else {
+                format!("no matched graph input {query}; graph inputs named {name}:")
+            };
+            (message, named)
+        }
+        _ => (
+            format!("{query} matches several graph inputs; pass one of:"),
+            matches,
+        ),
+    };
+    for source in candidates.iter().take(limit) {
+        message += &format!("\n  {source}");
+    }
+    if candidates.len() > limit {
+        message += &format!("\n  ... and {} more", candidates.len() - limit);
+    }
+    Err(anyhow::anyhow!(message))
 }
 
 fn write_report(path: PathBuf, content: String) -> Result<()> {
