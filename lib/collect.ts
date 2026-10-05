@@ -24,6 +24,7 @@ export interface CaptureOptions {
   actions?: string
   waitMs?: number
   cdnPrefixes?: string[]
+  allowOrigins?: string[]
   device?: string
   viewport?: {width: number; height: number}
   userAgent?: string
@@ -67,6 +68,7 @@ export async function prepare(
     actions,
     waitMs = 1000,
     cdnPrefixes = [],
+    allowOrigins = [],
     device,
     viewport,
     userAgent,
@@ -93,7 +95,16 @@ export async function prepare(
     )
     return remote.href
   })
-  const allowed = new Set([target.origin, ...remotes.map((remote) => new URL(remote).origin)])
+  // Requests that pass through, such as an API, without attributing the scripts they serve.
+  const origins = allowOrigins.map((value) => {
+    const origin = new URL(value)
+    assert(
+      ['http:', 'https:'].includes(origin.protocol) && origin.pathname === '/' && !origin.search && !origin.hash,
+      `--allow-origin must be an http(s) origin such as https://api.example.com: ${value}`,
+    )
+    return origin.origin
+  })
+  const allowed = new Set([target.origin, ...remotes.map((remote) => new URL(remote).origin), ...origins])
   const root = await realpath(resolve(dir))
   let action: Action | undefined
   if (actions) {
@@ -135,6 +146,7 @@ export async function prepare(
   return {
     target,
     remotes,
+    origins,
     allowed,
     root,
     action,
@@ -215,7 +227,8 @@ export async function verifyScript(cdp: CDPSession, root: string, scriptId: stri
 
 // Capture settings recorded in coverage and profile files.
 export async function environment(browser: Browser, page: Page, setup: Setup) {
-  const {playwright, device, emulation, network, cpuSlowdown, storageState, remotes} = setup
+  const {playwright, device, emulation, network, cpuSlowdown, storageState, remotes, origins} = setup
+  const exceptions = [remotes.length && '--cdn-prefix', origins.length && '--allow-origin'].filter(Boolean)
   return {
     browser: browser.version(),
     node: process.version,
@@ -232,8 +245,10 @@ export async function environment(browser: Browser, page: Page, setup: Setup) {
     // Records only whether a saved state was loaded; its cookies stay out of the artifact.
     storageState: Boolean(storageState),
     serviceWorkers: 'blocked',
-    externalRequests: remotes.length ? 'blocked except --cdn-prefix origins' : 'blocked',
+    externalRequests: exceptions.length ? `blocked except ${exceptions.join(' and ')} origins` : 'blocked',
     cdnPrefixes: remotes,
+    // Only when set, so profiles stay comparable with baselines recorded before the option existed.
+    ...(origins.length ? {allowedOrigins: origins} : {}),
   }
 }
 

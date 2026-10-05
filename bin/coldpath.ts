@@ -15,7 +15,7 @@ import type {Network} from '../lib/collect.ts'
 const usage = `Usage:
   coldpath collect --scenarios coldpath.scenarios.json
   coldpath collect --url URL --dir DIRECTORY --out FILE [--prefix PATH] [--scenario NAME] [--actions FILE] [--wait-ms N]
-                   [--cdn-prefix URL]... [--device NAME] [--viewport WxH] [--user-agent UA] [--device-scale-factor N] [--mobile] [--touch]
+                   [--cdn-prefix URL]... [--allow-origin ORIGIN]... [--device NAME] [--viewport WxH] [--user-agent UA] [--device-scale-factor N] [--mobile] [--touch]
                    [--latency-ms N --download-kbps N --upload-kbps N] [--cpu-slowdown N] [--storage-state FILE]
   coldpath profile --scenarios coldpath.scenarios.json [--runs N]
   coldpath graph --format esbuild|webpack|turbopack --input FILE --root BUILD_ROOT --out graph.json [--environment client|server|all]
@@ -49,6 +49,7 @@ async function main() {
         actions: {type: 'string'},
         'wait-ms': {type: 'string'},
         'cdn-prefix': {type: 'string', multiple: true},
+        'allow-origin': {type: 'string', multiple: true},
         device: {type: 'string'},
         viewport: {type: 'string'},
         'user-agent': {type: 'string'},
@@ -85,6 +86,7 @@ async function main() {
       actions: values.actions,
       waitMs: number('wait-ms'),
       cdnPrefixes: values['cdn-prefix'],
+      allowOrigins: values['allow-origin'],
       device: values.device,
       viewport,
       userAgent: values['user-agent'],

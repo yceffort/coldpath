@@ -106,7 +106,7 @@ Throttling changes which code runs only when the application reacts to timing (f
 
 A full-page navigation discards the old document's scripts. The collector injects an empty `beforeunload` listener into every document and sets a debugger breakpoint on it. When a document is about to unload, the page pauses, the collector takes a coverage snapshot and reads the scripts' sources, and the page resumes. The final snapshot is taken after the actions. All snapshots go into one envelope, where a script path can appear once per snapshot; the analyzer unions them. `environment.observation` records the snapshot count.
 
-Limitations: the injected listener runs in every document. Code that runs after `beforeunload` (for example `pagehide` or `unload` handlers) is not recorded. A page restored from the back/forward cache without unloading keeps its scripts, so it is covered by the next snapshot. Navigations to origins other than `--url` and `--cdn-prefix` origins are blocked.
+Limitations: the injected listener runs in every document. Code that runs after `beforeunload` (for example `pagehide` or `unload` handlers) is not recorded. A page restored from the back/forward cache without unloading keeps its scripts, so it is covered by the next snapshot. Navigations to origins other than `--url`, `--cdn-prefix`, and `--allow-origin` origins are blocked.
 
 ## CDN scripts
 
@@ -120,6 +120,10 @@ coldpath collect --url http://127.0.0.1:3000/ --dir dist \
 
 Envelope scripts record the browser `url` they were matched from.
 
+## Other origins
+
+A scenario that calls an API or loads other resources from another origin needs that origin in `--allow-origin` (repeatable; `allowOrigins` in a scenario file, at the top level or per scenario), such as `https://api.example.com`. Requests to it pass through and appear in the envelope's `requests`; scripts it serves are not attributed, so list a script origin under `--cdn-prefix` instead. `environment.allowedOrigins` records the allowed origins. The recording then depends on what that service returned at the time, so a different response can change which code runs.
+
 ## Unsupported: workers
 
 Web Worker, shared worker, and service worker coverage is not recorded, and worker scripts in `--dir` stay unmeasured. The collector cannot start precise coverage in a dedicated worker before the worker's top-level code runs: Playwright attaches to new workers itself and resumes them immediately, so by the time a second CDP session sees the worker, its top-level code has already run and V8 reports only some functions, without block detail. Holding the worker script request until coverage starts does not work either, because the worker target appears only after its script is fetched, and holding `importScripts` requests deadlocks the worker. A partial recording would report code that ran as unobserved, so the collector records nothing rather than wrong evidence. Service workers remain blocked.
@@ -128,7 +132,7 @@ Web Worker, shared worker, and service worker coverage is not recorded, and work
 
 The collector starts precise V8 coverage before navigation, waits for `networkidle`, waits another 1,000 ms by default, runs optional actions, and takes a final coverage snapshot (plus one before each unload). `--wait-ms 0` removes the extra observation window. Pages with persistent requests may never reach `networkidle`; use your own Playwright recording when a different readiness condition is required.
 
-Only the page's CDP target is captured. Workers, other tabs, and server-side execution are outside its scope. Service workers and cross-origin requests other than `--cdn-prefix` origins are blocked, so applications requiring external APIs need a different collector. Page runtime errors and unsuccessful navigation cause capture to fail. Precise coverage changes execution behavior, so capture durations are not performance measurements.
+Only the page's CDP target is captured. Workers, other tabs, and server-side execution are outside its scope. Service workers and cross-origin requests other than `--cdn-prefix` and `--allow-origin` origins are blocked, so an application that calls an external API needs its origin in [`--allow-origin`](#other-origins). Page runtime errors and unsuccessful navigation cause capture to fail. Precise coverage changes execution behavior, so capture durations are not performance measurements.
 
 Matching `.js`, `.mjs`, and `.cjs` scripts are checked against the local build with SHA-256. The artifact records those hashes, local map hashes (or explicit map absence), V8 function ranges, and capture metadata. Inline and eval scripts without a matching file extension are excluded. A missing matching file, stale build, or path outside `--dir` is an error.
 
