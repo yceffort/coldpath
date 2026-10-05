@@ -42,10 +42,29 @@ This skill covers apps whose build you control. For a site you cannot build (no 
 | --- | --- | --- |
 | Vite | `import coldpathGraph from '@yceffort/coldpath/vite'`, `plugins: [coldpathGraph()]` (early in the list), `build: {sourcemap: true}` | `dist/coldpath.graph.json` |
 | Rollup | `@yceffort/coldpath/rollup`, same plugin, `output.sourcemap: true` | next to output chunks |
-| webpack | `import ColdpathGraphPlugin from '@yceffort/coldpath/webpack'`, `plugins: [new ColdpathGraphPlugin()]`, `devtool: 'source-map'` | `coldpath.graph.json` in `output.path` |
+| webpack | `import ColdpathGraphPlugin from '@yceffort/coldpath/webpack'`, `plugins: [new ColdpathGraphPlugin()]`, `devtool: 'source-map'` | `coldpath.graph.json` in `output.path` (`new ColdpathGraphPlugin({fileName})` changes it) |
 | esbuild | `metafile: true`, write the metafile, then `npx coldpath graph --format esbuild --input meta.json --root . --out artifacts/graph.json` | `--out` path |
 
 The `--dir` of the scenario file is the build output directory, and `prefix` is the URL path it is served under (Vite default `/`; webpack uses `output.publicPath`).
+
+### Next.js (webpack)
+
+Next.js 15 and earlier build with webpack by default; Next.js 16 needs `next build --webpack`. Add the plugin to the client compilation only:
+
+```js
+// next.config.mjs
+import ColdpathGraphPlugin from '@yceffort/coldpath/webpack'
+
+export default {
+  productionBrowserSourceMaps: true,
+  webpack(config, {isServer}) {
+    if (!isServer) config.plugins.push(new ColdpathGraphPlugin())
+    return config
+  },
+}
+```
+
+`next build` writes `.next/coldpath.graph.json`. Use the scenario `dir` and `prefix` from the Turbopack section below, and pass `--graph .next/coldpath.graph.json --graph-root .` to `analyze`, run from the Next project directory (webpack's `context`), even in a monorepo.
 
 ### Next.js (Turbopack)
 

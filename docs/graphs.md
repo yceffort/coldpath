@@ -54,6 +54,32 @@ Module identifiers remain distinct across child compilations. Active reasons pro
 
 See webpack's [stats format](https://webpack.js.org/api/stats/) for the underlying evidence.
 
+### Next.js with webpack
+
+Next.js 15 and earlier build with webpack by default; Next.js 16 needs `next build --webpack`. Add the plugin to the client compilation only and enable production browser source maps:
+
+```js
+// next.config.mjs
+import ColdpathGraphPlugin from '@yceffort/coldpath/webpack'
+
+export default {
+  productionBrowserSourceMaps: true,
+  webpack(config, {isServer}) {
+    if (!isServer) config.plugins.push(new ColdpathGraphPlugin())
+    return config
+  },
+}
+```
+
+`next build` writes `.next/coldpath.graph.json`, and the next build replaces it, so no separate export step is needed. The graph root is webpack's `context`, the Next project directory, even inside a monorepo:
+
+```sh
+coldpath --dir .next/static --graph .next/coldpath.graph.json \
+  --graph-root /path/to/next-app --treemap artifacts/next.html
+```
+
+Checked with Next.js 16.3.8 and `next build --webpack`.
+
 ## Rollup and Vite
 
 Put the exporter early in your plugin list. It uses actual resolved module IDs and records import syntax before later transformations where possible:
