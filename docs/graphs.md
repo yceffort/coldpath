@@ -35,12 +35,12 @@ export default {
 }
 ```
 
-To export from saved stats instead, include modules (with those restored from a persistent cache), nested modules, reasons, and child compilations. Avoid grouped or truncated module lists. With the webpack Node API, write the result of:
+To export from saved stats instead, include modules (with those restored from a persistent cache), nested modules, orphan modules, reasons, and child compilations. Avoid grouped or truncated module lists. With the webpack Node API, write the result of:
 
 ```js
 stats.toJson({
   all: false, modules: true, nestedModules: true, reasons: true, children: true,
-  ids: true, cachedModules: true, groupModulesByType: false, groupModulesByPath: false,
+  ids: true, cachedModules: true, orphanModules: true, groupModulesByType: false, groupModulesByPath: false,
   groupModulesByAttributes: false, modulesSpace: Infinity, nestedModulesSpace: Infinity,
 })
 ```
@@ -50,7 +50,7 @@ coldpath graph \
   --format webpack --input stats.json --root /path/to/project --out artifacts/graph.json
 ```
 
-Module identifiers remain distinct across child compilations. Active reasons provide edges. Syntax parsing supplies import declaration positions when available; native `loc` values are the fallback. An import-specifier reason points at a use site and is never relabeled as an import declaration. Concatenated inner modules may omit reasons; their recorded first issuer supplies a dependency, and parsing the issuer can establish a matching static/dynamic import and position. That fallback is not an exhaustive list of all importers. Module source size is not treated as emitted bytes.
+Module identifiers remain distinct across child compilations. Active reasons provide edges. Syntax parsing supplies import declaration positions when available; native `loc` values are the fallback. An import-specifier reason points at a use site and is never relabeled as an import declaration. Module concatenation takes inner modules out of their chunks, and without `orphanModules` webpack drops every reason that comes from a module outside a chunk, so concatenated inner modules lose their importers; orphan modules listed at the top level are left out of the graph. A concatenated module's root takes the concatenated module's reasons. For stats saved without `orphanModules`, an inner module's first issuer supplies a single dependency, and parsing the issuer can establish a matching static/dynamic import and position; that fallback is not an exhaustive list of importers, and webpack can record a different issuer for an identical build. Module source size is not treated as emitted bytes.
 
 See webpack's [stats format](https://webpack.js.org/api/stats/) for the underlying evidence.
 

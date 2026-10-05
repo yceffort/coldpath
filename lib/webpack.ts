@@ -25,6 +25,8 @@ export default class ColdpathGraphPlugin {
         children: true,
         ids: true,
         cachedModules: true,
+        // Otherwise reasons from modules outside every chunk, which concatenated inner modules are, are dropped.
+        orphanModules: true,
         groupModulesByType: false,
         groupModulesByPath: false,
         groupModulesByAttributes: false,
