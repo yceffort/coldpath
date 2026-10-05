@@ -1,7 +1,7 @@
 {
   "name": "coldpath",
   "description": "Find which bundled JavaScript runs initially, which runs only after interactions, and why it is loaded.",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "author": {
     "name": "yceffort"
   },
