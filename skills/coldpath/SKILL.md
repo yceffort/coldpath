@@ -34,7 +34,7 @@ This skill covers apps whose build you control. For a site you cannot build (no 
    ```
 
    `--scenarios` already supplies `--dir`, every `--coverage`, `--scenario-order` (file order), and `--initial-scenario` (the first scenario); pass one of them only to override it.
-7. **Read `artifacts/coldpath.md` and the stdout summary.** They are bounded (about 20 rows per table) and contain no code. For one source, run the same command with `--why src/path/File.jsx` to print its import chain. Do not add `--details` for your own reading: it embeds source code and span data, and the JSON easily reaches tens of MB. Offer `--details --treemap` to the user only as an HTML report to open in a browser.
+7. **Read `artifacts/coldpath.md` and the stdout summary.** They are bounded (about 20 rows per table) and contain no code. For one source, run the same command with `--why src/path/File.jsx` to print its import chain. `--why` takes a source as the report prints it, or trailing path segments that match exactly one graph source (`node_modules/swiper/modules/pagination.mjs` finds the copy in a pnpm store); when several or none match, the error lists the candidates. Do not add `--details` for your own reading: it embeds source code and span data, and the JSON easily reaches tens of MB. Offer `--details --treemap` to the user only as an HTML report to open in a browser.
 
 ## Bundler setup
 
