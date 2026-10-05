@@ -185,4 +185,5 @@ Budget flags: `--max-bytes`, `--max-unobserved-bytes`, `--max-unmeasured-bytes`,
 | an action times out | the awaited element never appeared; check the selector against the real UI. Popups: `page.waitForEvent('popup')` |
 | everything `[unmapped]` | source maps are disabled or not next to the bundles |
 | `requires Playwright` | install Playwright and Chromium as in Requirements |
+| `graph has no entry modules`, or a webpack graph far smaller than the build | with `@yceffort/coldpath` 0.6.1 or earlier, the webpack plugin leaves out modules restored from webpack's persistent cache (`.next/cache` in Next.js). Upgrade, or delete the cache and rebuild |
 | worker code always unmeasured | workers are not recorded; not a bug in the app |
