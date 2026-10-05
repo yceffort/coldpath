@@ -34,6 +34,7 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
       network: option('network'),
       cpuSlowdown: option('cpuSlowdown'),
       cdnPrefixes: option('cdnPrefixes'),
+      allowOrigins: option('allowOrigins'),
       storageState: storageState && resolve(base, storageState),
       url: config.url ? new URL(url, config.url).href : url,
       dir: resolve(base, config.dir),

@@ -38,9 +38,21 @@ const cdn = await listen(async (request, response) => {
   else response.writeHead(404).end()
 })
 const cdnPrefix = `http://127.0.0.1:${(cdn.address() as AddressInfo).port}/static/`
+let apiHits = 0
+const api = await listen((_request, response) => {
+  apiHits++
+  response.setHeader('access-control-allow-origin', '*')
+  response.end('pong')
+})
+const apiOrigin = `http://127.0.0.1:${(api.address() as AddressInfo).port}`
 const app = await listen(async (request, response) => {
   if (request.url === '/')
     html(response, `<script src="${cdnPrefix}cdn.js"></script><script src="/assets/first.js"></script><a href="/second">next</a>`)
+  else if (request.url === '/api')
+    html(
+      response,
+      `<script src="/assets/first.js"></script><script>fetch('${apiOrigin}/ping').then((r) => r.text(), () => 'failed').then((text) => { document.title = text })</script>`,
+    )
   else if (request.url === '/second') html(response, '<script src="/assets/second.js"></script>')
   else if (request.url!.startsWith('/assets/')) script(response, await readFile(join(fixture, request.url!.slice(8))))
   else response.writeHead(404).end()
@@ -102,12 +114,46 @@ try {
   assert.deepEqual(blocked.blockedOrigins, [new URL(cdnPrefix).origin])
   assert(!blocked.scripts.some((s: any) => s.path === 'cdn.js'))
 
+  // Other origins, such as an API, are reachable only with --allow-origin, and scripts are never attributed to them.
+  const recordApi = (name: string, extra: string[]) =>
+    run(process.execPath, [
+      join(root, 'bin', 'coldpath.ts'),
+      'collect',
+      '--url',
+      `http://127.0.0.1:${(app.address() as AddressInfo).port}/api`,
+      '--dir',
+      fixture,
+      '--prefix',
+      '/assets/',
+      '--wait-ms',
+      '0',
+      '--scenario',
+      name,
+      '--out',
+      join(artifacts, `${name}.coverage.json`),
+      ...extra,
+    ])
+  await recordApi('api-blocked', [])
+  const apiBlocked = JSON.parse(await readFile(join(artifacts, 'api-blocked.coverage.json'), 'utf8'))
+  assert.equal(apiHits, 0)
+  assert.deepEqual(apiBlocked.blockedOrigins, [apiOrigin])
+  assert.equal(apiBlocked.environment.externalRequests, 'blocked')
+  assert(!('allowedOrigins' in apiBlocked.environment), 'an unused option must not change the environment')
+  await recordApi('api-allowed', ['--allow-origin', `${apiOrigin}/`])
+  const apiAllowed = JSON.parse(await readFile(join(artifacts, 'api-allowed.coverage.json'), 'utf8'))
+  assert.equal(apiHits, 1)
+  assert.deepEqual(apiAllowed.blockedOrigins, [])
+  assert.deepEqual(apiAllowed.environment.allowedOrigins, [apiOrigin])
+  assert.equal(apiAllowed.environment.externalRequests, 'blocked except --allow-origin origins')
+  assert(apiAllowed.requests.some((r: any) => r.path === `${apiOrigin}/ping` && r.type === 'fetch'))
+  await assert.rejects(recordApi('api-path', ['--allow-origin', `${apiOrigin}/v1`]), /--allow-origin must be an http\(s\) origin/)
+
   // A CDN copy that differs from the local build is rejected like a stale local file.
   cdnSuffix = '\n'
   await assert.rejects(collect('stale', ['--cdn-prefix', cdnPrefix]), /browser\/disk source mismatch: cdn\.js/)
 } finally {
-  await Promise.all([app, cdn].map((server) => new Promise((resolve) => server.close(resolve))))
+  await Promise.all([app, cdn, api].map((server) => new Promise((resolve) => server.close(resolve))))
 }
 console.log(
-  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins and stale CDN rejection.',
+  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins and stale CDN rejection.',
 )

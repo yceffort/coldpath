@@ -110,7 +110,7 @@ export default async function ({page}) {
 - Record every interaction the question depends on. A feature nobody exercised is unobserved by construction, so do not draw conclusions about it.
 - Take selectors from the real UI. If a browser automation tool (such as a Playwright MCP server) is available, use its accessibility snapshot on the served build; otherwise read the component source for roles, labels, and test ids. Either way, a successful `collect` run is the check.
 - For logged-in pages, ask the user for a Playwright storage state file and pass it as `storageState`. Never ask for or type their password.
-- Cross-origin requests are blocked except `cdnPrefixes`. An app that needs an external API during the scenario cannot be recorded this way; tell the user.
+- Cross-origin requests are blocked except `cdnPrefixes` (scripts to attribute) and `allowOrigins` (other requests, such as `"https://api.example.com"`). An app that calls an external API during the scenario needs that origin in `allowOrigins`; tell the user the recording then depends on the live service's responses. `allowOrigins` needs a version whose `npx coldpath --help` lists `--allow-origin`.
 
 ## Reading the results
 

@@ -246,6 +246,18 @@ try {
   })
   await coldpath('profile', '--scenarios', 'stay.scenarios.json', '--runs', '2')
   assert.deepEqual(Object.keys((await read('stay-out/stay.profile.json')).windows), ['load', 'action'])
+  // Network options from the scenario file reach profile runs and their recorded environment.
+  await scenarios('options.scenarios.json', {
+    url,
+    dir: flows,
+    prefix: '/assets/',
+    waitMs: 0,
+    out: 'options-out',
+    allowOrigins: ['https://api.example.com/'],
+    scenarios: [{name: 'initial'}],
+  })
+  await coldpath('profile', '--scenarios', 'options.scenarios.json', '--runs', '2')
+  assert.deepEqual((await read('options-out/initial.profile.json')).environment.allowedOrigins, ['https://api.example.com'])
   await scenarios('worker.scenarios.json', {
     url,
     dir: flows,
