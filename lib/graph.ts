@@ -16,6 +16,8 @@ export interface ImportSite {
   kind: ImportKind
   location: Location
   locationEvidence: LocationEvidence
+  // require() only: the call runs whenever its module evaluates.
+  topLevel?: boolean
 }
 // The graph JSON format in docs/graphs.md.
 export interface GraphModule {
@@ -33,6 +35,7 @@ export interface GraphEdge {
   specifier?: string | null
   location?: Location
   locationEvidence?: LocationEvidence
+  topLevel?: boolean
   sourceSha256?: string
 }
 export interface Graph {
@@ -48,6 +51,30 @@ export const slash = (path: string) => path.replaceAll('\\', '/')
 export const sourcePath = (path: string, root: string) =>
   path.startsWith('[project]/') ? path.slice(10) : isAbsolute(path) ? slash(relative(root, path)) : path.replace(/^\.\//, '')
 
+// Child keys evaluated whenever their node is. Anything else (functions, class bodies, branches, loops, catch clauses) may not run while the module evaluates.
+const evaluated: Record<string, string[]> = {
+  Program: ['body'],
+  ExpressionStatement: ['expression'],
+  VariableDeclaration: ['declarations'],
+  VariableDeclarator: ['init'],
+  ExportNamedDeclaration: ['declaration'],
+  ExportDefaultDeclaration: ['declaration'],
+  BlockStatement: ['body'],
+  TryStatement: ['block'],
+  AssignmentExpression: ['left', 'right'],
+  CallExpression: ['callee', 'arguments'],
+  NewExpression: ['callee', 'arguments'],
+  MemberExpression: ['object', 'property'],
+  SequenceExpression: ['expressions'],
+  ObjectExpression: ['properties'],
+  ObjectProperty: ['key', 'value'],
+  SpreadElement: ['argument'],
+  ArrayExpression: ['elements'],
+  TSAsExpression: ['expression'],
+  TSSatisfiesExpression: ['expression'],
+  TSNonNullExpression: ['expression'],
+}
+
 // Parse syntax, never execute a module. Dynamic expressions stay unresolved.
 export function importSites(code: string, filename: string): ImportSite[] {
   const ast = parse(code, {
@@ -58,7 +85,7 @@ export function importSites(code: string, filename: string): ImportSite[] {
   })
   const sites: ImportSite[] = []
   // Babel AST nodes, walked generically.
-  const visit = (node: any) => {
+  const visit = (node: any, topLevel: boolean) => {
     if (!node || typeof node !== 'object') return
     let value: unknown, kind: ImportKind | undefined
     if (['ImportDeclaration', 'ExportNamedDeclaration', 'ExportAllDeclaration'].includes(node.type)) {
@@ -79,14 +106,17 @@ export function importSites(code: string, filename: string): ImportSite[] {
         kind: kind!,
         location: {line: node.loc.start.line, column: node.loc.start.column + 1},
         locationEvidence: 'parsed-source',
+        ...(kind === 'require' && {topLevel}),
       })
     for (const [key, value] of Object.entries(node)) {
       if (['loc', 'start', 'end', 'extra', 'comments', 'tokens'].includes(key)) continue
-      if (Array.isArray(value)) value.forEach(visit)
-      else if (value && typeof value === 'object') visit(value)
+      // Only plain assignment: a logical one (a ||= require('x')) may skip its right side.
+      const runs = topLevel && !!evaluated[node.type]?.includes(key) && (node.type !== 'AssignmentExpression' || node.operator === '=')
+      if (Array.isArray(value)) value.forEach((child) => visit(child, runs))
+      else if (value && typeof value === 'object') visit(value, runs)
     }
   }
-  visit(ast.program)
+  visit(ast.program, true)
   return sites
 }
 

@@ -1,6 +1,10 @@
 //! Review suggestions grounded in measured scenarios and explicit import evidence.
 use crate::{
-    Report, attribution::UNMAPPED, ci::CompressedSizes, graph::ImportKind, metadata::ImportPath,
+    Report,
+    attribution::UNMAPPED,
+    ci::CompressedSizes,
+    graph::{ImportKind, ImportStep},
+    metadata::ImportPath,
 };
 use serde::Serialize;
 
@@ -42,8 +46,8 @@ pub fn build(report: &Report) -> Vec<Recommendation> {
             let initial_counts = initial
                 .and_then(|s| s.sources.iter().find(|s| s.source == candidate.source))
                 .map(|s| &s.counts);
-            let static_chain = path.is_some_and(|p| {
-                !p.edges.is_empty() && p.edges.iter().all(|e| e.kind == ImportKind::Static)
+            let synchronous_chain = path.is_some_and(|p| {
+                !p.edges.is_empty() && p.edges.iter().all(ImportStep::synchronous)
             });
             let dynamic_chain =
                 path.is_some_and(|p| p.edges.iter().any(|e| e.kind == ImportKind::Dynamic));
@@ -61,25 +65,25 @@ pub fn build(report: &Report) -> Vec<Recommendation> {
                     "measure-initial",
                     "Record this source in the initial scenario before inferring deferrable bytes. Missing coverage does not prove the chunk was absent from the initial load.",
                 )
-            } else if static_chain && top_level_only == Some(false) {
+            } else if synchronous_chain && top_level_only == Some(false) {
                 (
                     "split-review",
-                    "A static import chain reaches this source, and part of it executes initially. Consider separating the later-only functionality before introducing import(); deferring the whole module may break initial behavior.",
+                    "A synchronous import chain (static imports or top-level require() calls) reaches this source, and part of it executes initially. Consider separating the later-only functionality before introducing import(); deferring the whole module may break initial behavior.",
                 )
-            } else if static_chain && top_level_effect {
+            } else if synchronous_chain && top_level_effect {
                 (
                     "split-review",
-                    "A static import chain reaches this source. Initially only its top-level code ran, but that code calls, constructs or writes properties, which initial behavior may depend on. Check those statements before moving the import behind this interaction.",
+                    "A synchronous import chain (static imports or top-level require() calls) reaches this source. Initially only its top-level code ran, but that code calls, constructs or writes properties, which initial behavior may depend on. Check those statements before moving the import behind this interaction.",
                 )
-            } else if static_chain && top_level_only == Some(true) {
+            } else if synchronous_chain && top_level_only == Some(true) {
                 (
                     "defer-review",
-                    "A static import chain reaches this source. Initially only its top-level declarations were evaluated, with no calls, constructions or property writes; its functions execute in this interaction. Review moving the import behind this interaction and rebuild to measure transfer savings.",
+                    "A synchronous import chain (static imports or top-level require() calls) reaches this source. Initially only its top-level declarations were evaluated, with no calls, constructions or property writes; its functions execute in this interaction. Review moving the import behind this interaction and rebuild to measure transfer savings.",
                 )
-            } else if static_chain {
+            } else if synchronous_chain {
                 (
                     "defer-review",
-                    "A static import chain reaches this source. It was measured but not observed initially and executes in this interaction. Review moving the import behind this interaction, checking side effects and rebuilding to measure transfer savings.",
+                    "A synchronous import chain (static imports or top-level require() calls) reaches this source. It was measured but not observed initially and executes in this interaction. Review moving the import behind this interaction, checking side effects and rebuilding to measure transfer savings.",
                 )
             } else if dynamic_chain {
                 (

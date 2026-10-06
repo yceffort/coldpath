@@ -38,6 +38,26 @@ try {
       ['f', 'require'],
     ],
   )
+  // A require() is top level only when it runs whenever its module evaluates (#46).
+  assert.deepEqual(
+    importSites(
+      "const a = require('a'); module.exports = {b: require('b').b}; try { require('c') } catch { require('d') }\n" +
+        "if (x) require('e'); x && require('f'); function g() { require('g') } const h = () => require('h'); class I { i = require('i') } y ||= require('j')",
+      'cjs.js',
+    ).map((s) => [s.specifier, s.topLevel]),
+    [
+      ['a', true],
+      ['b', true],
+      ['c', true],
+      ['d', false],
+      ['e', false],
+      ['f', false],
+      ['g', false],
+      ['h', false],
+      ['i', false],
+      ['j', false],
+    ],
+  )
   assert.throws(() => turbopackGraph(Buffer.from([0, 0, 0, 99]), root), /Truncated/)
   const header = Buffer.from(
     JSON.stringify({modules: [], module_dependencies: {offset: 1, length: 100}, async_module_dependencies: {offset: 0, length: 0}}),
@@ -96,6 +116,7 @@ try {
     ],
   )
   assert.match(turbopack.warnings.join('\n'), /1 synchronous Turbopack edges/)
+  assert.equal(turbopack.edges[1].topLevel, true)
 
   // A warm persistent cache (such as .next/cache) restores modules without building them.
   const cached = join(root, 'cached')
