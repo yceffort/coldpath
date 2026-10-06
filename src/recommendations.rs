@@ -78,7 +78,7 @@ pub fn build(report: &Report) -> Vec<Recommendation> {
             } else if synchronous_chain && top_level_only == Some(true) {
                 (
                     "defer-review",
-                    "A synchronous import chain (static imports or top-level require() calls) reaches this source. Initially only its top-level declarations were evaluated, with no calls, constructions or property writes; its functions execute in this interaction. Review moving the import behind this interaction and rebuild to measure transfer savings.",
+                    "A synchronous import chain (static imports or top-level require() calls) reaches this source. Initially only its top-level declarations were evaluated, with no calls, constructions or property writes other than CommonJS exports; its functions execute in this interaction. Review moving the import behind this interaction and rebuild to measure transfer savings.",
                 )
             } else if synchronous_chain {
                 (
@@ -145,7 +145,8 @@ pub fn build(report: &Report) -> Vec<Recommendation> {
 
 /// Conservative scan of generated top-level code: any call, construction, tagged template,
 /// class, member write, update or `delete`/`await` counts, even inside string literals.
-/// Property reads that trigger getters are not detected.
+/// Plain CommonJS export writes (`X.exports = `, `X.exports.a = `, `exports.a = `) only build the
+/// module's own exports and do not count. Property reads that trigger getters are not detected.
 fn has_top_level_effect(code: &[u8]) -> bool {
     let identifier = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b >= 0x80;
     let mut words = code.split(|b| !identifier(*b));
@@ -165,15 +166,29 @@ fn has_top_level_effect(code: &[u8]) -> bool {
                 && !matches!(before.last(), Some(b'=' | b'!' | b'<' | b'>')) =>
             {
                 let target = before.trim_ascii_end();
-                let target = &target[..target.len()
+                let compound = target
+                    .iter()
+                    .rev()
+                    .take_while(|p| b"+-*/%&|^<>?".contains(p))
+                    .count();
+                let target = &target[..target.len() - compound];
+                let name = target.iter().rev().take_while(|p| identifier(**p)).count();
+                let path = target.len()
                     - target
                         .iter()
                         .rev()
-                        .take_while(|p| b"+-*/%&|^<>?".contains(p))
-                        .count()];
-                let name = target.iter().rev().take_while(|p| identifier(**p)).count();
-                matches!(target.last(), Some(b']'))
-                    || target[..target.len() - name].trim_ascii_end().last() == Some(&b'.')
+                        .take_while(|p| identifier(**p) || **p == b'.')
+                        .count();
+                let parts: Vec<&[u8]> = target[path..].split(|p| *p == b'.').collect();
+                let export = compound == 0
+                    && match parts[..] {
+                        [object, b"exports", ..] => !object.is_empty() && parts.len() <= 3,
+                        [b"exports", _] => true,
+                        _ => false,
+                    };
+                !export
+                    && (matches!(target.last(), Some(b']'))
+                        || target[..target.len() - name].trim_ascii_end().last() == Some(&b'.'))
             }
             _ => false,
         }
@@ -190,6 +205,10 @@ mod tests {
             "m=480,h=200;",
             "var b=`modulepreload`,ee=",
             "const a={x:1,y:[2]},b=a.x,c=a==b,d=a<=b;",
+            "t.exports={compute:}}",
+            "module.exports = {};",
+            "exports.a=b;",
+            "t.exports.a=1;",
         ] {
             assert!(!has_top_level_effect(code.as_bytes()), "{code}");
         }
@@ -203,6 +222,11 @@ mod tests {
             "class A{static x=1}",
             "n++;",
             "delete o.a;",
+            "t.exports=e.r(1);",
+            "a.b.exports=1;",
+            "t.exports.a.b=1;",
+            "t.exports+=1;",
+            "a[0].exports=1;",
         ] {
             assert!(has_top_level_effect(code.as_bytes()), "{code}");
         }
