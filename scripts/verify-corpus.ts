@@ -12,6 +12,7 @@ import {createRequire} from 'node:module'
 import {chromium} from '@playwright/test'
 import {build as esbuild} from 'esbuild'
 import {rollup} from 'rollup'
+import commonjsPlugin from '@rollup/plugin-commonjs'
 import {build as vite} from 'vite'
 import webpack from 'webpack'
 import {AnyMap, originalPositionFor, decodedMappings, LEAST_UPPER_BOUND} from '@jridgewell/trace-mapping'
@@ -22,13 +23,15 @@ import {esbuildGraph, turbopackGraph, enrichLocations, sha256} from '../lib/grap
 import {assertIntervals} from './reference.ts'
 import {readMap} from '../lib/maps.ts'
 
+// The plugin ships CommonJS types, so NodeNext types its default import as the whole module.
+const commonjs = commonjsPlugin as unknown as typeof commonjsPlugin.default
 const root = fileURLToPath(new URL('../', import.meta.url))
 const require = createRequire(import.meta.url)
 const work = join(root, 'artifacts/accuracy-corpus')
 const project = join(work, 'project')
 await rm(work, {recursive: true, force: true})
 await mkdir(join(project, 'src'), {recursive: true})
-for (const file of ['entry.js', 'startup.js', 'chart.js', 'register.js', 'mixed.js', 'search.js', 'page.jsx']) {
+for (const file of ['entry.js', 'startup.js', 'chart.js', 'register.js', 'mixed.js', 'legacy.cjs', 'search.js', 'page.jsx']) {
   await copyFile(join(root, 'fixtures/corpus', file), join(project, 'src', file))
 }
 await writeFile(join(project, 'package.json'), JSON.stringify({name: 'coldpath-accuracy-corpus', private: true, type: 'module'}))
@@ -68,7 +71,7 @@ const es = await esbuild({
 await finish('esbuild', esDir, 'entry/main.js', esbuildGraph(es.metafile, project))
 
 const rollupDir = join(work, 'rollup')
-const built = await rollup({input: join(project, 'src/entry.js'), plugins: [graphPlugin({root: project})]})
+const built = await rollup({input: join(project, 'src/entry.js'), plugins: [graphPlugin({root: project}), commonjs()]})
 await built.write({
   dir: rollupDir,
   format: 'esm',
@@ -293,6 +296,8 @@ try {
           if (next) {
             await page.locator('#report').click()
             await page.locator('#result').filter({hasText: 'CP_CORPUS_CHART_'}).waitFor()
+            await page.locator('#legacy').click()
+            await page.locator('#result').filter({hasText: 'CP_CORPUS_LEGACY_'}).waitFor()
           } else assert.match(await page.evaluate(() => globalThis.corpus!.openReport()), /CP_CORPUS_CHART_/)
         }
         if (scenario === 'search') {
@@ -383,19 +388,22 @@ try {
       assert(
         search?.edges.some(
           (edge: {to: string; kind: string; location?: {line: number}}) =>
-            edge.to.endsWith('/search.js') && edge.kind === 'dynamic' && edge.location?.line === (next ? 12 : 9),
+            edge.to.endsWith('/search.js') && edge.kind === 'dynamic' && edge.location?.line === (next ? 13 : 10),
         ),
         artifact.name + ': dynamic search boundary/location',
       )
+      const action = (file: string) =>
+        report.recommendations.find(
+          (r: {scenario: string; source: string}) => r.scenario === 'open-report' && r.source.endsWith('/' + file),
+        )?.kind
       if (artifact.name === 'vite' || artifact.name === 'webpack') {
-        const action = (file: string) =>
-          report.recommendations.find(
-            (r: {scenario: string; source: string}) => r.scenario === 'open-report' && r.source.endsWith('/' + file),
-          )?.kind
         assert.equal(action('chart.js'), 'defer-review', artifact.name + ': functions-only module')
         assert.equal(action('register.js'), 'split-review', artifact.name + ': top-level registration')
         assert.equal(action('mixed.js'), 'split-review', artifact.name + ': function called initially')
       }
+      // esbuild maps its __commonJS wrapper to the module itself, so the wrapper counts as a function of it.
+      if (artifact.name !== 'esbuild')
+        assert.equal(action('legacy.cjs'), 'defer-review', artifact.name + ': CommonJS module that only builds its exports')
       // Negative control: preserving every count while corrupting source ownership must fail.
       const changed = structuredClone(report)
       for (const bundle of changed.bundles)
