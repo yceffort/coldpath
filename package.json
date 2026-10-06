@@ -1,6 +1,6 @@
 {
   "name": "@yceffort/coldpath",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Trace which bundled JavaScript executes in real browser scenarios and why it is loaded",
   "license": "MIT",
   "repository": {
