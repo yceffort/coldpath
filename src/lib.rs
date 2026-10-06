@@ -531,7 +531,7 @@ pub fn analyze_with_options(
         let observations = coverage.remove(&path);
         let mut used = Vec::new();
         let mut scenario_used: BTreeMap<String, Vec<Interval>> = BTreeMap::new();
-        let mut initial_function_used = Some(Vec::new());
+        let mut initial_function_used = Some((Vec::new(), Vec::new()));
         let mut verification = Vec::new();
         if let Some(observations) = &observations {
             for observation in observations {
@@ -560,18 +560,31 @@ pub fn analyze_with_options(
                 if options.initial_scenario.as_ref() == Some(&observation.scenario) {
                     initial_function_used = match (
                         initial_function_used,
-                        observation.function_used(&text, |start| {
+                        observation.function_used(&text, |root| {
                             // Bundler wrappers (webpack's runtime IIFE, module factories) map to no source.
-                            text.byte(start).is_ok_and(|byte| {
-                                segments[segments.partition_point(|s| s.end <= byte)..]
-                                    .first()
-                                    .is_some_and(|s| s.source == 0)
+                            // Turbopack factories and Rolldown's CommonJS wrappers have no mapping at their
+                            // start, so the previous module's last mapping claims it, while the wrapper's
+                            // own code maps to another source.
+                            text.byte(root.start_offset).is_ok_and(|byte| {
+                                let index = segments.partition_point(|s| s.end <= byte);
+                                segments.get(index).is_some_and(|s| {
+                                    s.source == 0
+                                        || s.start < byte
+                                            && text.byte(root.end_offset).is_ok_and(|end| {
+                                                segments[index + 1..]
+                                                    .iter()
+                                                    .take_while(|next| next.start < end)
+                                                    .find(|next| next.source != 0)
+                                                    .is_some_and(|next| next.source != s.source)
+                                            })
+                                })
                             })
                         })?,
                     ) {
-                        (Some(mut all), Some(ranges)) => {
+                        (Some((mut all, mut scopes)), Some((ranges, wrappers))) => {
                             all.extend(ranges);
-                            Some(all)
+                            scopes.extend(wrappers);
+                            Some((all, scopes))
                         }
                         _ => None,
                     };
@@ -610,21 +623,43 @@ pub fn analyze_with_options(
             .as_ref()
             .and_then(|name| scenario_used.get(name))
         {
-            let function_used = match initial_function_used {
-                Some(ranges) => coverage::union(ranges)
-                    .into_iter()
-                    .map(|range| {
-                        Ok(Interval {
-                            start: text.byte(range.start)?,
-                            end: text.byte(range.end)?,
+            let (function_used, mut boundaries) = match initial_function_used {
+                Some((ranges, scopes)) => (
+                    coverage::union(ranges)
+                        .into_iter()
+                        .map(|range| {
+                            Ok(Interval {
+                                start: text.byte(range.start)?,
+                                end: text.byte(range.end)?,
+                            })
                         })
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-                None => initial_used.clone(),
+                        .collect::<Result<Vec<_>>>()?,
+                    scopes
+                        .iter()
+                        .flat_map(|scope| [scope.start, scope.end])
+                        .map(|offset| text.byte(offset))
+                        .collect::<Result<Vec<_>>>()?,
+                ),
+                None => (initial_used.clone(), Vec::new()),
             };
+            boundaries.sort_unstable();
             let top_level = scenario::difference(initial_used, &function_used);
-            let (mut function_cursor, mut top_level_cursor) = (0, 0);
+            let (mut function_cursor, mut top_level_cursor, mut boundary) = (0, 0, 0);
             for segment in &segments {
+                // A mapping owns bytes up to the next mapping, which can run past a module
+                // wrapper into the next module; those bytes are not this source's execution.
+                while boundaries
+                    .get(boundary)
+                    .is_some_and(|&b| b <= segment.start)
+                {
+                    boundary += 1;
+                }
+                let segment = &IndexedSegment {
+                    end: boundaries
+                        .get(boundary)
+                        .map_or(segment.end, |&b| b.min(segment.end)),
+                    ..*segment
+                };
                 let function_bytes =
                     scenario::overlap(segment, &function_used, &mut function_cursor);
                 scenario::overlap(segment, &top_level, &mut top_level_cursor);

@@ -343,6 +343,41 @@ fn graph_recommendations_prefer_static_evidence_and_distinguish_partial_initial_
 }
 
 #[test]
+fn unmapped_factory_starts_do_not_count_as_previous_module_execution() {
+    // Turbopack emits no mapping between factories, so heavy.js's last mapping runs into the next factory (#48).
+    let f = Fixture::new();
+    let source = "self.T=[1,(e,t,r)=>{t.exports={f:()=>0}},2,e=>{var a=e.i(1)}];";
+    f.write("app.js", source);
+    f.write(
+        "app.js.map",
+        &json!({"version":3,"sources":["heavy.js","next.js"],"names":[],"mappings":"oBAAA,aAAK,cCAL"})
+            .to_string(),
+    );
+    let range = |code: &str, count: u64| {
+        let start = source.find(code).unwrap();
+        json!({"startOffset":start,"endOffset":start + code.len(),"count":count})
+    };
+    let functions = json!([
+        {"isBlockCoverage":true,"ranges":[{"startOffset":0,"endOffset":source.len(),"count":1}]},
+        {"isBlockCoverage":true,"ranges":[range("(e,t,r)=>{t.exports={f:()=>0}}", 1)]},
+        {"isBlockCoverage":true,"ranges":[range("()=>0", 0)]},
+        {"isBlockCoverage":true,"ranges":[range("e=>{var a=e.i(1)}", 1)]},
+    ]);
+    let file = f.write("initial", &json!({"schemaVersion":1,"scenario":"initial","scripts":[{"path":"app.js","sha256":sha256(source.as_bytes()),"sourceMapSha256":sha256(&fs::read(f.0.join("app.js.map")).unwrap()),"functions":functions}]}).to_string());
+    let options = AnalyzeOptions {
+        initial_scenario: Some("initial".into()),
+        ..Default::default()
+    };
+    let report = analyze_with_options(&f.0, &[file], &options).unwrap();
+    let heavy = &report.initial_execution["heavy.js"];
+    assert_eq!(heavy.function_bytes, 0);
+    assert_eq!(heavy.top_level, b"t.exports={f:}}");
+    let next = &report.initial_execution["next.js"];
+    assert_eq!(next.function_bytes, 0);
+    assert_eq!(next.top_level, b"var a=e.i(1)}");
+}
+
+#[test]
 fn unobserved_budget_fails_without_selected_measurements_but_accepts_measured_zero_use() {
     let f = Fixture::new();
     f.write("app.js", "abcd");

@@ -112,8 +112,8 @@ impl Observation {
     pub fn function_used(
         &self,
         text: &TextIndex,
-        module_scope: impl Fn(usize) -> bool,
-    ) -> Result<Option<Vec<Interval>>> {
+        module_scope: impl Fn(&coverage::CoverageRange) -> bool,
+    ) -> Result<Option<(Vec<Interval>, Vec<Interval>)>> {
         match &self.ranges {
             Ranges::V8(functions) => {
                 coverage::function_used_ranges(functions, text, module_scope).map(Some)

@@ -65,21 +65,25 @@ pub fn used_ranges(functions: &[FunctionCoverage], text: &TextIndex) -> Result<V
 
 /// Bytes executed inside functions, excluding module evaluation: the script's top level
 /// (whose root range spans the whole script) and functions for which `module_scope` returns
-/// true given the root start. Top-level blocks are excluded with their function.
+/// true given the root range. Top-level blocks are excluded with their function. Also returns
+/// the root ranges of those module-scope functions.
 pub fn function_used_ranges(
     functions: &[FunctionCoverage],
     text: &TextIndex,
-    module_scope: impl Fn(usize) -> bool,
-) -> Result<Vec<Interval>> {
-    nested_used_ranges(
-        functions.iter().filter(|function| {
-            !function.ranges.first().is_some_and(|root| {
-                (root.start_offset == 0 && root.end_offset == text.utf16_len())
-                    || module_scope(root.start_offset)
-            })
-        }),
-        text,
-    )
+    module_scope: impl Fn(&CoverageRange) -> bool,
+) -> Result<(Vec<Interval>, Vec<Interval>)> {
+    let (mut inner, mut scopes) = (Vec::new(), Vec::new());
+    for function in functions {
+        match function.ranges.first() {
+            Some(root) if root.start_offset == 0 && root.end_offset == text.utf16_len() => {}
+            Some(root) if module_scope(root) => scopes.push(Interval {
+                start: root.start_offset,
+                end: root.end_offset,
+            }),
+            _ => inner.push(function),
+        }
+    }
+    Ok((nested_used_ranges(inner, text)?, scopes))
 }
 
 fn nested_used_ranges<'a>(
