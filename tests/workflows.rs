@@ -282,6 +282,55 @@ fn graph_recommendations_prefer_static_evidence_and_distinguish_partial_initial_
             .iter()
             .any(|r| r.kind == "dynamic-boundary-review")
     );
+    // A require() that runs whenever its importer evaluates loads the target like a static import (#46).
+    let action = |report: &coldpath::Report, file: &str| {
+        report
+            .recommendations
+            .iter()
+            .find(|r| r.source.ends_with(file))
+            .map(|r| r.kind)
+    };
+    let mut required = data.clone();
+    for edge in [2, 3] {
+        required["edges"][edge]["kind"] = json!("require");
+        required["edges"][edge]["topLevel"] = json!(true);
+    }
+    graph::attach(
+        &mut report,
+        &serde_json::to_vec(&required).unwrap(),
+        &f.0,
+        &f.0,
+    )
+    .unwrap();
+    let path = report
+        .import_paths
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|p| p.source == "src/a.js")
+        .unwrap();
+    assert_eq!(
+        path.path.as_ref().unwrap(),
+        &["src/main.js", "src/middle.js", "src/a.js"]
+    );
+    assert_eq!(path.edges[1].top_level, Some(true));
+    assert_eq!(action(&report, "/a.js"), Some("split-review"));
+    assert_eq!(action(&report, "/b.js"), Some("defer-review"));
+    // Without that evidence the call may run later, so the shorter dynamic path and the fallback remain.
+    required["edges"][2]["topLevel"] = json!(false);
+    required["edges"][3]
+        .as_object_mut()
+        .unwrap()
+        .remove("topLevel");
+    graph::attach(
+        &mut report,
+        &serde_json::to_vec(&required).unwrap(),
+        &f.0,
+        &f.0,
+    )
+    .unwrap();
+    assert_eq!(action(&report, "/a.js"), Some("dynamic-boundary-review"));
+    assert_eq!(action(&report, "/b.js"), Some("inspect-imports"));
     let mut bad = data.clone();
     bad["edges"][0]["to"] = json!("missing");
     assert!(graph::attach(&mut report, &serde_json::to_vec(&bad).unwrap(), &f.0, &f.0).is_err());

@@ -126,7 +126,7 @@ Review actions (`recommendations` in JSON, "Review actions" in Markdown):
 
 | Action | Evidence | What you may propose |
 | --- | --- | --- |
-| `defer-review` | static import chain; initially nothing ran, or only top-level declarations without side effects | load it behind `import()` or a route boundary at the importing line `--why` shows |
+| `defer-review` | chain of static imports and top-level `require()` calls; initially nothing ran, or only top-level declarations without side effects | load it behind `import()` or a route boundary at the importing line `--why` shows; when it replaces `require()`, note that `import()` resolves to a namespace object, not `module.exports` |
 | `split-review` | a function of the source ran initially, or its top-level code calls, constructs, or writes properties | move only the later-only functions to a new module and lazy load that one; if `initialTopLevelOnly` is true, check those top-level statements first |
 | `dynamic-boundary-review` | already behind a dynamic import | usually nothing; check the boundary is where you expect |
 | `measure-initial` | no initial recording for its bundle | record it in `initial` before concluding anything |

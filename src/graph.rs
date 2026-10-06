@@ -31,6 +31,17 @@ pub struct ImportStep {
     pub location: Option<Location>,
     pub location_evidence: Option<String>,
     pub specifier: Option<String>,
+    /// For a `require` edge parsed from source: whether the call runs whenever the importer evaluates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_level: Option<bool>,
+}
+
+impl ImportStep {
+    /// Static imports and top-level require() calls evaluate the target while the importer evaluates.
+    pub fn synchronous(&self) -> bool {
+        self.kind == ImportKind::Static
+            || (self.kind == ImportKind::Require && self.top_level == Some(true))
+    }
 }
 
 #[derive(Deserialize)]
@@ -99,8 +110,8 @@ pub fn attach(
         .map(|m| m.id.as_str())
         .collect::<Vec<_>>();
     ensure!(!roots.is_empty(), "graph has no entry modules");
-    // Prefer a proven static chain over a shorter path crossing a dynamic boundary.
-    let walk = |static_only: bool| {
+    // Prefer a proven synchronous chain over a shorter path crossing a dynamic boundary.
+    let walk = |synchronous_only: bool| {
         let mut paths: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
         let mut queue = VecDeque::new();
         for root in &roots {
@@ -110,7 +121,7 @@ pub fn attach(
         while let Some(from) = queue.pop_front() {
             for &index in outgoing.get(from).into_iter().flatten() {
                 let edge = &graph.edges[index];
-                if static_only && edge.kind != ImportKind::Static {
+                if synchronous_only && !edge.synchronous() {
                     continue;
                 }
                 if !paths.contains_key(edge.to.as_str()) {
@@ -123,7 +134,7 @@ pub fn attach(
         }
         paths
     };
-    let static_paths = walk(true);
+    let synchronous_paths = walk(true);
     let all_paths = walk(false);
     let root = std::fs::canonicalize(analysis_root)?;
     let directory = std::fs::canonicalize(build_root)?;
@@ -202,7 +213,7 @@ pub fn attach(
         let Some(names) = aliases.get(&resolver.resolve(&module.source)) else {
             continue;
         };
-        let path = static_paths
+        let path = synchronous_paths
             .get(module.id.as_str())
             .or_else(|| all_paths.get(module.id.as_str()));
         let edges = path
@@ -247,9 +258,7 @@ pub fn attach(
                 let rank = |p: &ImportPath| {
                     if p.path.is_none() {
                         3
-                    } else if !p.edges.is_empty()
-                        && p.edges.iter().all(|e| e.kind == ImportKind::Static)
-                    {
+                    } else if !p.edges.is_empty() && p.edges.iter().all(ImportStep::synchronous) {
                         0
                     } else if p.edges.iter().any(|e| e.kind == ImportKind::Dynamic) {
                         1
