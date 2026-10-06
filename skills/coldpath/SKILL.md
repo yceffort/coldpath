@@ -133,7 +133,7 @@ Review actions (`recommendations` in JSON, "Review actions" in Markdown):
 | `inspect-imports` | import path evidence only | show the chain; no change implied |
 | `removal-review` | zero observed bytes, fully measured in every scenario | a candidate for the user to investigate, never an instruction to delete |
 
-Each recommendation carries `initialObservedBytes` and `initialTopLevelOnly` in the JSON. The side-effect check scans generated code and misses getters triggered by property reads; when a bundler inlines a module into another source's function (for example Turbopack), its initial bytes count as function execution and the action is `split-review` even for pure declarations. Read the source before deferring either way.
+Each recommendation carries `initialObservedBytes` and `initialTopLevelOnly` in the JSON. The side-effect check scans generated code and misses getters triggered by property reads; it ignores CommonJS export assignments only when they keep the `exports` name (`t.exports = {...}`), so a minified `exports.a = b` still counts. esbuild maps its `__commonJS` wrapper to the module itself, so its CommonJS modules get `split-review`. When a bundler inlines a module into another source's function (for example Turbopack constant-folding a call into the caller), its initial bytes count as function execution and the action is `split-review` even for pure declarations. Read the source before deferring either way.
 
 Rules for the answer:
 
