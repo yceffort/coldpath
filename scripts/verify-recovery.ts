@@ -18,7 +18,7 @@ const work = join(root, 'artifacts/recovery')
 const NEXT15 = '15.5.25'
 await rm(work, {recursive: true, force: true})
 await mkdir(join(work, 'src'), {recursive: true})
-for (const file of ['entry.js', 'startup.js', 'chart.js', 'register.js', 'mixed.js', 'search.js', 'page.jsx'])
+for (const file of ['entry.js', 'startup.js', 'chart.js', 'register.js', 'mixed.js', 'legacy.cjs', 'search.js', 'page.jsx'])
   await copyFile(join(root, 'fixtures/corpus', file), join(work, 'src', file))
 // React supplies real package modules next to the corpus sources.
 await writeFile(
@@ -64,7 +64,8 @@ builds.push({name: 'next-turbopack', version: require('next/package.json').versi
 const next15 = join(work, 'next15')
 await mkdir(join(next15, 'pages'), {recursive: true})
 await copyFile(join(root, 'fixtures/corpus/page.jsx'), join(next15, 'pages/index.jsx'))
-for (const file of ['startup.js', 'chart.js', 'search.js']) await copyFile(join(root, 'fixtures/corpus', file), join(next15, 'pages', file))
+for (const file of ['startup.js', 'chart.js', 'legacy.cjs', 'search.js'])
+  await copyFile(join(root, 'fixtures/corpus', file), join(next15, 'pages', file))
 await writeFile(
   join(next15, 'package.json'),
   JSON.stringify({
