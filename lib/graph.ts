@@ -74,6 +74,18 @@ const evaluated: Record<string, string[]> = {
   TSSatisfiesExpression: ['expression'],
   TSNonNullExpression: ['expression'],
 }
+const isNodeEnv = (node: any) =>
+  node?.type === 'MemberExpression' &&
+  node.property.name === 'NODE_ENV' &&
+  node.object.type === 'MemberExpression' &&
+  node.object.property.name === 'env' &&
+  node.object.object.name === 'process'
+// process.env.NODE_ENV === 'production': bundlers fold the test at build time and drop the other branch's imports, so a graph edge comes from the branch that runs.
+const foldedAtBuild = (test: any) =>
+  test?.type === 'BinaryExpression' &&
+  ['===', '!==', '==', '!='].includes(test.operator) &&
+  [test.left, test.right].some(isNodeEnv) &&
+  [test.left, test.right].some((side) => side.type === 'StringLiteral')
 
 // Parse syntax, never execute a module. Dynamic expressions stay unresolved.
 export function importSites(code: string, filename: string): ImportSite[] {
@@ -111,7 +123,13 @@ export function importSites(code: string, filename: string): ImportSite[] {
     for (const [key, value] of Object.entries(node)) {
       if (['loc', 'start', 'end', 'extra', 'comments', 'tokens'].includes(key)) continue
       // Only plain assignment: a logical one (a ||= require('x')) may skip its right side.
-      const runs = topLevel && !!evaluated[node.type]?.includes(key) && (node.type !== 'AssignmentExpression' || node.operator === '=')
+      const runs =
+        topLevel &&
+        (!!evaluated[node.type]?.includes(key) ||
+          (['IfStatement', 'ConditionalExpression'].includes(node.type) &&
+            ['consequent', 'alternate'].includes(key) &&
+            foldedAtBuild(node.test))) &&
+        (node.type !== 'AssignmentExpression' || node.operator === '=')
       if (Array.isArray(value)) value.forEach((child) => visit(child, runs))
       else if (value && typeof value === 'object') visit(value, runs)
     }

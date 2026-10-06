@@ -42,7 +42,9 @@ try {
   assert.deepEqual(
     importSites(
       "const a = require('a'); module.exports = {b: require('b').b}; try { require('c') } catch { require('d') }\n" +
-        "if (x) require('e'); x && require('f'); function g() { require('g') } const h = () => require('h'); class I { i = require('i') } y ||= require('j')",
+        "if (x) require('e'); x && require('f'); function g() { require('g') } const h = () => require('h'); class I { i = require('i') } y ||= require('j')\n" +
+        "if (process.env.NODE_ENV === 'production') { module.exports = require('k') } else { module.exports = require('l') }\n" +
+        "module.exports = 'production' !== process.env.NODE_ENV ? require('m') : require('n'); if (process.env.FLAG === 'on') require('o')",
       'cjs.js',
     ).map((s) => [s.specifier, s.topLevel]),
     [
@@ -56,6 +58,11 @@ try {
       ['h', false],
       ['i', false],
       ['j', false],
+      ['k', true],
+      ['l', true],
+      ['m', true],
+      ['n', true],
+      ['o', false],
     ],
   )
   assert.throws(() => turbopackGraph(Buffer.from([0, 0, 0, 99]), root), /Truncated/)
@@ -159,6 +166,29 @@ try {
   assert.deepEqual([...new Set(importers)].sort(), ['a.js', 'b.js'])
   const sources = concatenated.modules.map((m: {source: string}) => m.source)
   assert.equal(new Set(sources).size + 1, sources.length, 'only the concatenated module repeats its root source')
+
+  // A production build folds process.env.NODE_ENV and keeps only the taken branch's require() (#46).
+  const dispatch = join(root, 'dispatch')
+  await mkdir(dispatch)
+  await writeFile(join(dispatch, 'entry.js'), "import dispatch from './dispatch.js'\nconsole.log(dispatch.name)\n")
+  await writeFile(
+    join(dispatch, 'dispatch.js'),
+    "if (process.env.NODE_ENV === 'production') {\n  module.exports = require('./prod.js')\n} else {\n  module.exports = require('./dev.js')\n}\n",
+  )
+  await writeFile(join(dispatch, 'prod.js'), "exports.name = 'prod'\n")
+  await writeFile(join(dispatch, 'dev.js'), "exports.name = 'dev'\n")
+  const dispatched = JSON.parse(await buildGraph(dispatch))
+  const name = (id: string) =>
+    dispatched.modules
+      .find((m: {id: string}) => m.id === id)
+      .source.split('/')
+      .at(-1)
+  assert.deepEqual(
+    dispatched.edges
+      .filter((e: {from: string}) => name(e.from) === 'dispatch.js')
+      .map((e: {to: string; kind: string; topLevel?: boolean}) => [name(e.to), e.kind, e.topLevel]),
+    [['prod.js', 'require', true]],
+  )
 
   // Top-level orphans are left out; a concatenated module's root takes its reasons; the issuer is used only
   // when stats carry no reasons (saved without orphanModules).
