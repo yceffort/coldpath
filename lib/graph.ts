@@ -429,17 +429,19 @@ export function turbopackGraph(bytes: Buffer, root: string, environment = 'clien
       previous = end
     }
   }
-  if (!modules.some((m) => m.entry)) {
-    const targets = new Set(edges.map((e) => e.to))
-    for (const mod of modules) mod.entry = !targets.has(mod.id)
-  }
-  return {
-    schemaVersion: 1,
-    bundler: 'turbopack',
-    modules,
-    edges,
-    warnings: [
-      'Turbopack analyzer graphs are experimental and produced separately from the application build. Keep both from the same source revision.',
-    ],
-  }
+  // The runtime also loads modules that nothing imports, such as the Pages Router bootstrap next/dist/client/next-turbopack.js.
+  const targets = new Set(edges.map((e) => e.to))
+  const roots = modules.filter((m) => !m.entry && !targets.has(m.id))
+  for (const mod of roots) mod.entry = true
+  const warnings = [
+    'Turbopack analyzer graphs are experimental and produced separately from the application build. Keep both from the same source revision.',
+  ]
+  if (roots.length)
+    warnings.push(
+      `${roots.length} modules that no module imports are entries: ${roots
+        .slice(0, 3)
+        .map((m) => m.source)
+        .join(', ')}${roots.length > 3 ? ', ...' : ''}.`,
+    )
+  return {schemaVersion: 1, bundler: 'turbopack', modules, edges, warnings}
 }

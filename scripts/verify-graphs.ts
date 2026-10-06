@@ -88,7 +88,17 @@ try {
   )
   await writeFile(join(root, 'node_modules/cond/esm/x.js'), '')
   await writeFile(join(root, 'node_modules/cond/cjs/x.cjs'), '')
-  const names = ['page.js', 'esm.js', 'cjs.js', 'mixed.js', 'pure.js', 'pkg.js', 'node_modules/dep/index.js', 'node_modules/cond/cjs/x.cjs']
+  const names = [
+    'page.js',
+    'esm.js',
+    'cjs.js',
+    'mixed.js',
+    'pure.js',
+    'pkg.js',
+    'node_modules/dep/index.js',
+    'node_modules/cond/cjs/x.cjs',
+    '[next]/entry/page-loader.ts',
+  ]
   const sync: [number, number][] = [
     [0, 1],
     [0, 2],
@@ -96,6 +106,7 @@ try {
     [3, 6],
     [3, 7],
     [4, 5],
+    [8, 0],
   ]
   const block = Buffer.alloc(4 + names.length * 4 + sync.length * 4)
   block.writeUInt32BE(names.length)
@@ -103,7 +114,9 @@ try {
   sync.forEach(([, to], i) => block.writeUInt32BE(to, 4 + names.length * 4 + i * 4))
   const syncHeader = Buffer.from(
     JSON.stringify({
-      modules: names.map((name) => ({ident: `[project]/${name} [client] (ecmascript)`, path: `[project]/${name}`})),
+      modules: names
+        .map((name) => (name.startsWith('[next]') ? name : `[project]/${name}`))
+        .map((path) => ({ident: `${path} [client] (ecmascript)`, path})),
       module_dependencies: {offset: 0, length: block.length},
       async_module_dependencies: {offset: 0, length: 0},
     }),
@@ -120,9 +133,16 @@ try {
       ['mixed.js', 'node_modules/dep/index.js', 'require', 2],
       ['mixed.js', 'node_modules/cond/cjs/x.cjs', 'require', 3],
       ['pure.js', 'pkg.js', 'static', null],
+      ['[next]/entry/page-loader.ts', 'page.js', 'static', null],
     ],
   )
   assert.match(turbopack.warnings.join('\n'), /1 synchronous Turbopack edges/)
+  // The runtime also loads modules that nothing imports, such as the Pages Router bootstrap next/dist/client/next-turbopack.js.
+  assert.deepEqual(
+    turbopack.modules.filter((m) => m.entry).map((m) => names[Number(m.id)]),
+    ['mixed.js', 'pure.js', '[next]/entry/page-loader.ts'],
+  )
+  assert.match(turbopack.warnings.join('\n'), /2 modules that no module imports are entries: mixed\.js, pure\.js/)
   assert.equal(turbopack.edges[1].topLevel, true)
 
   // A warm persistent cache (such as .next/cache) restores modules without building them.
