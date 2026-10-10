@@ -1179,3 +1179,59 @@ fn a_recorded_graph_root_replaces_the_current_directory() {
     );
     assert!(report["importPaths"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn package_importers_name_the_first_party_imports_that_load_a_dependency() {
+    let f = feature_fixture();
+    f.write("graph.json", &feature_graph("."));
+    let output = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args([
+            "--dir",
+            ".",
+            "--coverage",
+            "initial",
+            "--graph",
+            "graph.json",
+        ])
+        .args(["--json", "-", "--markdown", "summary.md"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let package = |name: &str| {
+        report["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["package"] == name)
+            .unwrap()["importers"]
+            .clone()
+    };
+    assert_eq!(
+        package("a"),
+        json!([
+            {"source":"src/features/auth/login.js","kind":"static","location":{"line":3,"column":1}},
+            {"source":"src/features/cart/cart.js","kind":"dynamic","location":{"line":1,"column":8}}
+        ])
+    );
+    // Reached through a: the location is that of the import into a. The virtual entry is not first-party code.
+    assert_eq!(
+        package("b"),
+        json!([
+            {"source":"src/features/auth/login.js","kind":"static","location":{"line":3,"column":1},"via":"a"},
+            {"source":"src/features/cart/cart.js","kind":"dynamic","location":{"line":1,"column":8},"via":"a"}
+        ])
+    );
+    let md = fs::read_to_string(f.0.join("summary.md")).unwrap();
+    assert!(
+        md.contains("| a | 4 | 4 | 0 | src/features/auth/login.js, src/features/cart/cart.js |")
+    );
+    assert!(md.contains(
+        "| b | 4 | 4 | 0 | src/features/auth/login.js via a, src/features/cart/cart.js via a |"
+    ));
+}
