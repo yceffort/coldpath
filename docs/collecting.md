@@ -142,11 +142,13 @@ A scenario that calls an API or loads other resources from another origin needs 
 
 ## Router prefetches
 
-A Next.js App Router page prefetches the routes of visible links, and a page segment prefetch also loads the client chunks of that route. The chunk registers its modules without evaluating them, so the recorded page would count another route's code as unobserved. The collector leaves such a script out of `scripts` and lists it in the envelope's `prefetchedScripts` with the routes that named it when three things hold: the response to a request with a `Next-Router-Prefetch` header names the script's path, no main document or other RSC response names it, and no function in it ran beyond its top level. Its bundle then counts as unmeasured in that scenario. A script that the page itself references, or whose modules ran, stays recorded. The summary lists what was left out:
+A Next.js App Router page prefetches the routes of visible links, and a page segment prefetch also loads the client chunks of that route. In a Turbopack build the chunk registers its modules without evaluating them, so the recorded page would count another route's code as unobserved. The collector leaves such a script out of `scripts` and lists it in the envelope's `prefetchedScripts` with the routes that named it when three things hold: the response to a request with a `Next-Router-Prefetch` header names the script's path, no main document or other RSC response names it, and no function in it ran beyond its top level. Its bundle then counts as unmeasured in that scenario. A script that the page itself references, or whose modules ran, stays recorded. The summary lists what was left out:
 
 ```text
 initial: left out scripts that only router prefetches for other routes loaded: chunks/1v61rpt861wcs.js (/about)
 ```
+
+Only App Router builds with Turbopack, the Next.js 16 default, are handled. In a webpack build the prefetched page chunk evaluates its entry modules as it loads, and the Pages Router loads other pages' chunks through its build manifest without a `Next-Router-Prefetch` request. Those chunks stay recorded, so another route's code counts as observed and unobserved bytes of the recorded page (issue [#59](https://github.com/yceffort/coldpath/issues/59)).
 
 ## Checking the page state
 
