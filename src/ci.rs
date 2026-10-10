@@ -154,6 +154,24 @@ pub fn markdown(report: &Report) -> String {
             row.counts.unmeasured_bytes
         ));
     }
+    if !report.groups.is_empty() {
+        out.push_str("\n| Group | Sources | Generated B | Observed B | Unobserved B | Unmeasured B | Estimated gzip B |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+        for row in report.groups.iter().take(20) {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} | {} |\n",
+                escape_markdown(&row.group),
+                row.sources,
+                row.counts.bytes,
+                row.counts.observed_bytes,
+                row.counts.unobserved_bytes,
+                row.counts.unmeasured_bytes,
+                row.estimated_compression
+                    .as_ref()
+                    .map(|c| c.gzip_bytes.to_string())
+                    .unwrap_or_else(|| "—".into()),
+            ));
+        }
+    }
     for scenario in &report.scenario_reports {
         out.push_str(&format!(
             "\n## Scenario: {}\n\n{} B observed · {} B unobserved · {} B unmeasured.\n",

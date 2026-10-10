@@ -782,6 +782,18 @@ fn evidence_replays_offline_after_the_workspace_is_gone() {
         );
     }
 
+    // --group-by only shapes output, so a replay accepts it.
+    let grouped = run(
+        &offline,
+        &["--replay", "evidence", "--group-by", "**/src/*"],
+    );
+    assert!(
+        grouped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&grouped.stderr)
+    );
+    assert!(String::from_utf8_lossy(&grouped.stdout).contains("Group"));
+
     fs::write(evidence.join("tree/maps/app.map"), "{}").unwrap();
     let changed = run(&offline, &["--replay", "evidence"]);
     assert_eq!(changed.status.code(), Some(1));
@@ -992,4 +1004,77 @@ fn recording_warnings_report_aborted_origins_and_tolerated_page_errors() {
         "{md}"
     );
     assert!(md.contains("> - initial: allowPageErrors tolerated 4 page errors"));
+}
+
+/// Three first-party sources under two feature directories and two dependencies, the first
+/// six bytes observed.
+fn feature_fixture() -> Fixture {
+    let f = Fixture::new();
+    let source = "abcdefghijklmnopqrst";
+    f.write("app.js", source);
+    f.map(&[
+        "src/features/auth/login.js",
+        "src/features/auth/form.js",
+        "src/features/cart/cart.js",
+        "node_modules/a/index.js",
+        "node_modules/b/index.js",
+    ]);
+    f.coverage(
+        "initial",
+        source,
+        json!([{"startOffset":0,"endOffset":6,"count":1}]),
+    );
+    f
+}
+
+#[test]
+fn group_by_sums_sources_under_the_shortest_matching_path() {
+    let f = feature_fixture();
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args(["--dir", ".", "--coverage", "initial"])
+            .args(["--json", "-", "--markdown", "summary.md"])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let output = run(&[
+        "--group-by",
+        "src/features/*",
+        "--group-by",
+        "node_modules/*",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| (
+                g["group"].as_str().unwrap(),
+                g["pattern"].as_str().unwrap(),
+                g["sources"].as_u64().unwrap(),
+                g["bytes"].as_u64().unwrap(),
+                g["observedBytes"].as_u64().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("src/features/auth", "src/features/*", 2, 8, 6),
+            ("node_modules/a", "node_modules/*", 1, 4, 0),
+            ("node_modules/b", "node_modules/*", 1, 4, 0),
+            ("src/features/cart", "src/features/*", 1, 4, 0),
+        ]
+    );
+    let md = fs::read_to_string(f.0.join("summary.md")).unwrap();
+    assert!(md.contains("| src/features/auth | 2 | 8 | 6 | 2 | 0 | — |"));
+    assert!(
+        String::from_utf8_lossy(&run(&["--group-by", "src/["]).stderr)
+            .contains("invalid --group-by glob")
+    );
 }
