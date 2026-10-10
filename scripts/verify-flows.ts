@@ -53,7 +53,7 @@ const app = await listen(async (request, response) => {
   else if (request.url === '/api')
     html(
       response,
-      `<script src="/assets/first.js"></script><script>fetch('${apiOrigin}/ping').then((r) => r.text(), () => 'failed').then((text) => { document.title = text })</script>`,
+      `<script src="/assets/first.js"></script><script>fetch('${apiOrigin}/ping').then((r) => r.text(), () => 'failed').then((text) => { document.body.append(text) })</script>`,
     )
   else if (request.url === '/error')
     html(response, `<script src="/assets/first.js"></script><script>Promise.reject(new Error('flaky request'))</script>`)
@@ -138,14 +138,24 @@ try {
       ...extra,
     ])
   const recordApi = (name: string, extra: string[]) => record(name, '/api', extra)
-  await recordApi('api-blocked', [])
+  // The summary names the final page and the aborted requests, and an expect selector rejects the fallback screen.
+  const {stderr: summary} = await recordApi('api-blocked', [])
+  assert.match(
+    summary,
+    /api-blocked: final page http:\/\/127\.0\.0\.1:\d+\/api \(document status 200\), [1-9]\d* console errors, 0 page errors/,
+  )
+  assert(summary.includes(`api-blocked: aborted requests to origins outside --allow-origin and --cdn-prefix: ${apiOrigin} (1)`), summary)
+  await assert.rejects(
+    recordApi('api-expect', ['--expect', 'text=pong']),
+    /no visible element matches expect "text=pong" on the final page/,
+  )
   const apiBlocked = JSON.parse(await readFile(join(artifacts, 'api-blocked.coverage.json'), 'utf8'))
   assert.equal(apiHits, 0)
   assert.deepEqual(apiBlocked.blockedOrigins, [apiOrigin])
   assert.deepEqual(apiBlocked.pageErrors, [])
   assert.equal(apiBlocked.environment.externalRequests, 'blocked')
   assert(!('allowedOrigins' in apiBlocked.environment), 'an unused option must not change the environment')
-  await recordApi('api-allowed', ['--allow-origin', `${apiOrigin}/`])
+  await recordApi('api-allowed', ['--allow-origin', `${apiOrigin}/`, '--expect', 'text=pong'])
   const apiAllowed = JSON.parse(await readFile(join(artifacts, 'api-allowed.coverage.json'), 'utf8'))
   assert.equal(apiHits, 1)
   assert.deepEqual(apiAllowed.blockedOrigins, [])
@@ -162,7 +172,7 @@ try {
   await context.route('${apiOrigin}/**', (route) => route.fulfill({body: 'mocked', headers: {'access-control-allow-origin': '*'}}))
 }\n`,
   )
-  await recordApi('api-mocked', ['--actions', mock, '--header', 'x-coldpath: secret-value'])
+  await recordApi('api-mocked', ['--actions', mock, '--expect', 'text=mocked', '--header', 'x-coldpath: secret-value'])
   const apiMocked = JSON.parse(await readFile(join(artifacts, 'api-mocked.coverage.json'), 'utf8'))
   assert.equal(apiHits, 1)
   assert.equal(header, 'secret-value')
@@ -185,5 +195,5 @@ try {
   await Promise.all([app, cdn, api].map((server) => new Promise((resolve) => server.close(resolve))))
 }
 console.log(
-  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, setup routes, extra headers, tolerated page errors and stale CDN rejection.',
+  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors and stale CDN rejection.',
 )

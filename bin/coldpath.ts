@@ -46,6 +46,7 @@ Records V8 coverage of one browser scenario with Playwright's Chromium (docs/col
   --scenario NAME            Scenario name (default initial)
   --actions FILE             Module whose default export runs after load; its setup export runs before navigation
   --wait-ms N                Observation window after networkidle (default 1000)
+  --expect SELECTOR          Playwright selector that must be visible at the end; repeatable
   --allow-page-error REGEX   Record page errors whose message matches instead of failing; repeatable
   --header 'NAME: VALUE'     Extra HTTP request header; repeatable
   --cdn-prefix URL           Also record scripts under this URL; repeatable
@@ -145,6 +146,7 @@ async function main() {
         'upload-kbps': {type: 'string'},
         'cpu-slowdown': {type: 'string'},
         'storage-state': {type: 'string'},
+        expect: {type: 'string', multiple: true},
         'allow-page-error': {type: 'string', multiple: true},
         header: {type: 'string', multiple: true},
         'browser-path': {type: 'string'},
@@ -193,6 +195,7 @@ async function main() {
         : undefined,
       storageState: values['storage-state'],
       extraHTTPHeaders,
+      expect: values.expect,
       allowPageErrors: values['allow-page-error'],
       browserPath: values['browser-path'],
       browserChannel: values['browser-channel'],
