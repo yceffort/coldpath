@@ -58,6 +58,17 @@ coldpath --dir dist/assets \
 
 The module runs as local Node.js code. Paths are resolved from the current working directory. Each collector invocation launches a fresh browser, so an interaction recording also contains its initial page load. Actions may navigate to other same-origin pages (links, form submissions, `page.goto`); see [multi-page flows](#multi-page-flows).
 
+An actions module can also export `setup`, which receives the same `{page, context}` before the first navigation, or export only `setup`. Use it for what the first load depends on, such as answering API calls with `route.fulfill` instead of running a mock server:
+
+```js
+// scenarios/mocked.mjs
+export async function setup({ context }) {
+  await context.route("https://api.example.com/**", (route) => route.fulfill({ json: { items: [] } }));
+}
+```
+
+Playwright runs the most recently registered route first, so routes from `setup` run before the collector's [origin policy](#other-origins). A fulfilled request never reaches the network and appears in neither `requests` nor `blockedOrigins`. `route.fallback()` hands a request to the origin policy; `route.continue()` sends it to the network even when its origin is not allowed. `environment.observation` starts with `setup before navigation` when a `setup` ran.
+
 ## Scenario files
 
 A scenario file records several scenarios in order and gives the analyzer the matching order:
@@ -97,10 +108,11 @@ By default the collector uses a 1280x900 desktop viewport with no throttling and
 | `--latency-ms N --download-kbps N --upload-kbps N` | `network: {latencyMs, downloadKbps, uploadKbps}` | Chromium network emulation. All three values are required. |
 | `--cpu-slowdown N` | `cpuSlowdown` | Chromium CPU throttling rate (`1` is no slowdown). |
 | `--storage-state FILE` | `storageState` | A Playwright [storage state](https://playwright.dev/docs/auth) file with cookies and local storage, for example from a logged-in session. |
+| `--header 'NAME: VALUE'` | `extraHTTPHeaders: {NAME: VALUE}` | Extra headers on every request, including the document request, for a server that renders by a token or device header. Repeatable on the command line. |
 | `--browser-channel NAME` | `browserChannel` | An installed browser by [Playwright channel](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge), such as `chrome` or `msedge`, instead of Playwright's Chromium. |
 | `--browser-path FILE` | `browserPath` | An installed Chromium-based browser executable. Cannot be combined with `--browser-channel`. |
 
-Explicit options override the device's values. The envelope's `environment` records the device name, viewport, effective user agent, scale factor, mobile and touch flags, network and CPU settings, and whether a storage state was loaded. It never records the storage state's contents or path. Keep storage state files out of version control; they usually contain session cookies.
+Explicit options override the device's values. The envelope's `environment` records the device name, viewport, effective user agent, scale factor, mobile and touch flags, network and CPU settings, whether a storage state was loaded, and the names of extra headers. It never records the storage state's contents or path, or header values. Keep storage state files out of version control; they usually contain session cookies. Rather than writing a token into the scenario file, set it in [`setup`](#custom-interactions) from an environment variable with `context.setExtraHTTPHeaders()`.
 
 `environment.browser` records the browser version; `browserChannel` records the channel, and `browserPath: true` only that an executable was named, not its path. Recordings from different browser builds can differ in which code runs and how long it takes, so compare recordings made with the same browser.
 
@@ -134,7 +146,7 @@ Web Worker, shared worker, and service worker coverage is not recorded, and work
 
 ## What is recorded
 
-The collector starts precise V8 coverage before navigation, waits for `networkidle`, waits another 1,000 ms by default, runs optional actions, and takes a final coverage snapshot (plus one before each unload). `--wait-ms 0` removes the extra observation window. Pages with persistent requests may never reach `networkidle`; use your own Playwright recording when a different readiness condition is required.
+The collector runs the actions module's optional `setup`, starts precise V8 coverage before navigation, waits for `networkidle`, waits another 1,000 ms by default, runs optional actions, and takes a final coverage snapshot (plus one before each unload). `--wait-ms 0` removes the extra observation window. Pages with persistent requests may never reach `networkidle`; use your own Playwright recording when a different readiness condition is required.
 
 Only the page's CDP target is captured. Workers, other tabs, and server-side execution are outside its scope. Service workers and cross-origin requests other than `--cdn-prefix` and `--allow-origin` origins are blocked, so an application that calls an external API needs its origin in [`--allow-origin`](#other-origins). Page runtime errors and unsuccessful navigation cause capture to fail. Precise coverage changes execution behavior, so capture durations are not performance measurements.
 

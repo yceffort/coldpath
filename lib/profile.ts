@@ -286,7 +286,7 @@ export async function profile(scenarios: (CaptureOptions & {profileOut?: string}
         ...entry.environment,
         machine: host,
         scope: 'page main thread only; no worker CPU time',
-        observation: `a fresh browser per run; load window: navigation networkidle + ${setup.waitMs}ms${setup.action ? '; action window: custom actions' : ''}; only the profiler runs during windows`,
+        observation: `a fresh browser per run; ${setup.beforeNavigation ? 'setup before navigation; ' : ''}load window: navigation networkidle + ${setup.waitMs}ms${setup.action ? '; action window: custom actions' : ''}; only the profiler runs during windows`,
       },
       url: setup.target.href,
       blockedOrigins: [...entry.blocked].sort(),

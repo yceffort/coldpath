@@ -44,8 +44,9 @@ Records V8 coverage of one browser scenario with Playwright's Chromium (docs/col
   --out FILE                 Coverage file to write
   --prefix PATH              URL path under which --dir is served (default /)
   --scenario NAME            Scenario name (default initial)
-  --actions FILE             Module whose default export runs after load
+  --actions FILE             Module whose default export runs after load; its setup export runs before navigation
   --wait-ms N                Observation window after networkidle (default 1000)
+  --header 'NAME: VALUE'     Extra HTTP request header; repeatable
   --cdn-prefix URL           Also record scripts under this URL; repeatable
   --allow-origin ORIGIN      Let requests to this origin through; repeatable
   --device NAME              Playwright device descriptor, such as 'Pixel 7'
@@ -143,6 +144,7 @@ async function main() {
         'upload-kbps': {type: 'string'},
         'cpu-slowdown': {type: 'string'},
         'storage-state': {type: 'string'},
+        header: {type: 'string', multiple: true},
         'browser-path': {type: 'string'},
         'browser-channel': {type: 'string'},
       },
@@ -161,6 +163,12 @@ async function main() {
       viewport = {width: Number(match[1]), height: Number(match[2])}
     }
     const throttled = (['latency-ms', 'download-kbps', 'upload-kbps'] as const).some((key) => values[key] !== undefined)
+    let extraHTTPHeaders: Record<string, string> | undefined
+    for (const header of values.header ?? []) {
+      const match = /^([^:\s]+):\s*(.*)$/.exec(header)
+      if (!match) throw new Error(`--header must be 'NAME: VALUE': ${header}`)
+      extraHTTPHeaders = {...extraHTTPHeaders, [match[1]]: match[2]}
+    }
     await collect({
       url: values.url,
       dir: values.dir,
@@ -182,6 +190,7 @@ async function main() {
         ? ({latencyMs: number('latency-ms'), downloadKbps: number('download-kbps'), uploadKbps: number('upload-kbps')} as Network)
         : undefined,
       storageState: values['storage-state'],
+      extraHTTPHeaders,
       browserPath: values['browser-path'],
       browserChannel: values['browser-channel'],
     })
