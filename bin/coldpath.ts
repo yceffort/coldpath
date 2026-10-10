@@ -7,17 +7,14 @@ import {collect} from '../lib/collect.ts'
 import {exportGraph} from '../lib/export-graph.ts'
 import {label} from '../lib/label.ts'
 import {inferModules} from '../lib/modules.ts'
-import {profile} from '../lib/profile.ts'
+import {DEFAULT_RUNS, profile} from '../lib/profile.ts'
 import {loadScenarios} from '../lib/scenarios.ts'
 import {snapshot} from '../lib/snapshot.ts'
 import type {Network} from '../lib/collect.ts'
 
 const usage = `Usage:
   coldpath collect --scenarios coldpath.scenarios.json
-  coldpath collect --url URL --dir DIRECTORY --out FILE [--prefix PATH] [--scenario NAME] [--actions FILE] [--wait-ms N]
-                   [--cdn-prefix URL]... [--allow-origin ORIGIN]... [--device NAME] [--viewport WxH] [--user-agent UA] [--device-scale-factor N] [--mobile] [--touch]
-                   [--latency-ms N --download-kbps N --upload-kbps N] [--cpu-slowdown N] [--storage-state FILE]
-                   [--browser-path FILE | --browser-channel NAME]
+  coldpath collect --url URL --dir DIRECTORY --out FILE [COLLECT OPTIONS...]
   coldpath profile --scenarios coldpath.scenarios.json [--runs N]
   coldpath graph --format esbuild|webpack|turbopack --input FILE --root BUILD_ROOT --out graph.json [--environment client|server|all]
   coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [--browser-path FILE | --browser-channel NAME]
@@ -28,13 +25,97 @@ const usage = `Usage:
   coldpath --replay DIRECTORY [--json FILE] [--html FILE]
   coldpath [ANALYZER OPTIONS...]
 
-Run \`coldpath analyze --help\` for analyzer options. See docs/collecting.md, docs/cpu.md, docs/graphs.md and docs/third-party.md.`
+Run \`coldpath COMMAND --help\` for a command's options, and \`coldpath analyze --help\` for analyzer options.
+See docs/collecting.md, docs/cpu.md, docs/graphs.md and docs/third-party.md.`
+
+const browserOptions = `  --browser-channel NAME     Installed browser by Playwright channel, such as chrome or msedge
+  --browser-path FILE        Installed Chromium-based browser executable (not with --browser-channel)`
+
+const help: Record<string, string> = {
+  collect: `Usage:
+  coldpath collect --scenarios coldpath.scenarios.json
+  coldpath collect --url URL --dir DIRECTORY --out FILE [OPTIONS...]
+
+Records V8 coverage of one browser scenario with Playwright's Chromium (docs/collecting.md).
+
+  --scenarios FILE           Collect every scenario of a scenario file, in order
+  --url URL                  Page to open
+  --dir DIRECTORY            Build output the served scripts must match
+  --out FILE                 Coverage file to write
+  --prefix PATH              URL path under which --dir is served (default /)
+  --scenario NAME            Scenario name (default initial)
+  --actions FILE             Module whose default export runs after load
+  --wait-ms N                Observation window after networkidle (default 1000)
+  --cdn-prefix URL           Also record scripts under this URL; repeatable
+  --allow-origin ORIGIN      Let requests to this origin through; repeatable
+  --device NAME              Playwright device descriptor, such as 'Pixel 7'
+  --viewport WxH             Viewport (default 1280x900)
+  --user-agent UA            User agent
+  --device-scale-factor N    Pixel ratio
+  --mobile, --touch          Mobile viewport handling and touch events
+  --latency-ms N --download-kbps N --upload-kbps N
+                             Network emulation; all three are required
+  --cpu-slowdown N           CPU throttling rate (default 1, no slowdown)
+  --storage-state FILE       Playwright storage state with cookies and local storage
+${browserOptions}`,
+  profile: `Usage: coldpath profile --scenarios coldpath.scenarios.json [--runs N]
+
+Records repeated CPU profiles of every scenario in a scenario file (docs/cpu.md).
+
+  --scenarios FILE           Scenario file, as for collect
+  --runs N                   Runs per scenario, at least 2 (default ${DEFAULT_RUNS})`,
+  graph: `Usage: coldpath graph --format esbuild|webpack|turbopack --input FILE --root BUILD_ROOT --out graph.json [--environment client|server|all]
+
+Exports a bundler's module graph for the analyzer's --graph (docs/graphs.md).
+
+  --format NAME              esbuild metafile, webpack stats, or Turbopack analyzer output
+  --input FILE               Metafile, stats JSON, or the Turbopack analyze directory or modules.data
+  --root BUILD_ROOT          Directory the bundler's module paths are relative to (default .)
+  --out FILE                 Graph JSON to write
+  --environment NAME         Turbopack module variants: client, server, or all (default client)`,
+  snapshot: `Usage: coldpath snapshot --url URL --out DIRECTORY [OPTIONS...]
+
+Records the scripts a deployed site serves, their V8 coverage, and what caused each load (docs/third-party.md).
+
+  --url URL                  Page to open
+  --out DIRECTORY            Output directory
+  --wait-ms N                Wait after load (default 5000)
+  --actions FILE             Module whose default export runs after load
+  --scenario NAME            Write coverage/NAME.json and accumulate visits in --out
+${browserOptions}`,
+  modules: `Usage: coldpath modules --dir DIRECTORY --out MAP_DIRECTORY [OPTIONS...]
+
+Recovers module boundaries from map-less webpack and Turbopack chunks as source maps (docs/third-party.md).
+
+  --dir DIRECTORY            Scripts to read
+  --out MAP_DIRECTORY        Directory for recovered maps and maps.json
+  --maps-json FILE           Existing bindings, such as snapshot's maps.json; repeatable
+  --chunks                   Turn a script without recognizable modules into one whole-chunk source
+  --graph FILE               Also write a dependency graph`,
+  label: `Usage: coldpath label --report report.json --out labels.json [OPTIONS...]
+
+Asks a language model to label sources of a --details report. This sends code to the provider (docs/third-party.md).
+
+  --report FILE              Report JSON written with --details
+  --out FILE                 Labels JSON to write
+  --mode identify|describe   Recovered sources only, or every source with content (default identify)
+  --provider anthropic|openai
+                             Model provider (default anthropic)
+  --model NAME               Model (default claude-haiku-4-5 for anthropic; required for openai)
+  --base-url URL             OpenAI-compatible server
+  --top N                    Sources with the most unobserved bytes to label (default 50)
+  --lang LANGUAGE            Language of summaries (default English)`,
+}
 
 const [command, ...rest] = process.argv.slice(2)
 
 async function main() {
   if (command === undefined || command === '-h' || command === '--help') {
     console.log(usage)
+    return 0
+  }
+  if (Object.hasOwn(help, command) && (rest.includes('--help') || rest.includes('-h'))) {
+    console.log(help[command])
     return 0
   }
   if (command === 'collect') {
