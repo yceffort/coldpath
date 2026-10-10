@@ -267,6 +267,16 @@ fn graph_recommendations_prefer_static_evidence_and_distinguish_partial_initial_
     let md = ci::markdown(&report);
     assert!(md.contains("src/middle.js:12:3"));
     assert!(md.contains("not additive transfer savings"));
+    // One table per action kind, so small kinds are not crowded out by large ones (#53).
+    assert!(md.contains("3 actions: 1 split-review, 1 defer-review, 1 removal-review."));
+    let headings = ["split-review", "defer-review", "removal-review"].map(|kind| {
+        md.find(&format!(
+            "\n### {kind}: 1 on application code, 0 on dependencies\n"
+        ))
+    });
+    assert!(headings.iter().all(Option::is_some), "{md}");
+    assert!(headings.is_sorted());
+    assert!(recommendations.iter().all(|r| r.package == "[application]"));
     let mut dynamic = data.clone();
     dynamic["edges"][1]["kind"] = json!("dynamic");
     graph::attach(

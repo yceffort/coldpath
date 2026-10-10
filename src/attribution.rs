@@ -448,6 +448,9 @@ fn validate_map(map: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+/// The package of every source outside `node_modules`.
+pub const APPLICATION: &str = "[application]";
+
 pub fn package(source: &str) -> String {
     if source == UNMAPPED {
         return UNMAPPED.into();
@@ -461,5 +464,5 @@ pub fn package(source: &str) -> String {
         }
         return first.to_owned();
     }
-    "[application]".into()
+    APPLICATION.into()
 }

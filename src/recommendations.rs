@@ -1,7 +1,7 @@
 //! Review suggestions grounded in measured scenarios and explicit import evidence.
 use crate::{
     Report,
-    attribution::UNMAPPED,
+    attribution::{UNMAPPED, package},
     ci::CompressedSizes,
     graph::{ImportKind, ImportStep},
     metadata::ImportPath,
@@ -13,6 +13,8 @@ use serde::Serialize;
 pub struct Recommendation {
     pub kind: &'static str,
     pub source: String,
+    /// `[application]` for first-party code, else the dependency's package name.
+    pub package: String,
     pub scenario: Option<String>,
     pub bytes: usize,
     pub estimated_compression: Option<CompressedSizes>,
@@ -26,6 +28,16 @@ pub struct Recommendation {
     pub initial_top_level_only: Option<bool>,
     pub explanation: &'static str,
 }
+
+/// Every recommendation kind, in the order summaries present them.
+pub const KINDS: [&str; 6] = [
+    "measure-initial",
+    "split-review",
+    "defer-review",
+    "dynamic-boundary-review",
+    "inspect-imports",
+    "removal-review",
+];
 
 pub fn build(report: &Report) -> Vec<Recommendation> {
     let mut result = Vec::new();
@@ -99,6 +111,7 @@ pub fn build(report: &Report) -> Vec<Recommendation> {
             result.push(Recommendation {
                 kind,
                 source: candidate.source.clone(),
+                package: package(&candidate.source),
                 scenario: Some(scenario.scenario.clone()),
                 bytes: candidate.interaction_only_bytes
                     + candidate.initial_unmeasured_observed_bytes,
@@ -128,7 +141,7 @@ pub fn build(report: &Report) -> Vec<Recommendation> {
                 .any(|s| s.source == source.source && s.counts.unmeasured_bytes == 0)
         });
         if fully_measured {
-            result.push(Recommendation { kind: "removal-review", source: source.source.clone(), scenario: None,
+            result.push(Recommendation { kind: "removal-review", source: source.source.clone(), package: source.package.clone(), scenario: None,
                 bytes: source.counts.bytes, estimated_compression: source.estimated_compression.clone(), import_path: None,
                 initial_observed_bytes: None, initial_top_level_only: None,
                 explanation: "No execution was observed in any supplied scenario, and each scenario measured this source. Review missing user flows, side effects and tests before removing it; coverage alone does not prove removal is safe." });
