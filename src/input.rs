@@ -295,6 +295,25 @@ pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Lo
                     }
                 ));
             }
+            if !file.prefetched_scripts.is_empty() {
+                let shown = file
+                    .prefetched_scripts
+                    .iter()
+                    .take(3)
+                    .map(|script| format!("{} ({})", script.path, script.routes.join(", ")))
+                    .collect::<Vec<_>>();
+                recording.push(format!(
+                    "{}: the collector left out {} scripts that only router prefetches for other routes loaded and that ran no module, so their bytes count as unmeasured: {}{}",
+                    file.scenario,
+                    file.prefetched_scripts.len(),
+                    shown.join(", "),
+                    if file.prefetched_scripts.len() > 3 {
+                        ", ..."
+                    } else {
+                        ""
+                    }
+                ));
+            }
             for script in file.scripts {
                 coverage::validate_path(&script.path)?;
                 index.entry(script.path).or_default().push(Observation {

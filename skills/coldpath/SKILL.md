@@ -123,7 +123,7 @@ export default async function ({page}) {
 
 Bytes are generated, uncompressed UTF-8, not original source size or transfer size. Compression figures from `--source-compression` are isolated estimates, not guaranteed savings.
 
-If `analyze` prints `recording warning:` (Markdown: a warning above the totals), the collector aborted requests or tolerated page errors in that scenario. Say so before any number from it: the numbers describe the page as recorded.
+If `analyze` prints `recording warning:` (Markdown: a warning above the totals), the collector aborted requests, tolerated page errors, or left out scripts that only Next.js router prefetches for other routes loaded (their bytes count as unmeasured) in that scenario. Say so before any number from it: the numbers describe the page as recorded.
 
 Review actions (`recommendations` in JSON, "Review actions" in Markdown):
 

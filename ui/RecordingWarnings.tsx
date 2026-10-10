@@ -5,7 +5,7 @@ export function RecordingWarnings({warnings}: {warnings?: string[]}) {
   if (!warnings?.length) return null
   return (
     <section id="recording-warnings" role="note" {...stylex.props(styles.box)}>
-      <strong>The collector reported page state problems. These numbers describe the page as it was recorded.</strong>
+      <strong>The collector reported page state problems or left scripts out. These numbers describe the page as it was recorded.</strong>
       <ul {...stylex.props(styles.list)}>
         {warnings.map((warning, index) => (
           <li key={index}>{warning}</li>

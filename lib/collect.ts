@@ -273,6 +273,7 @@ function summary(
   state: {status: number | null; consoleErrors: number},
   blocked: Map<string, number>,
   errors: string[],
+  prefetched: Prefetched[],
 ) {
   const lines = [
     `${scenario}: final page ${url} (document status ${state.status ?? 'none'}), ${state.consoleErrors} console errors, ${errors.length} page errors`,
@@ -281,7 +282,37 @@ function summary(
     const origins = [...blocked].sort(([a], [b]) => a.localeCompare(b)).map(([origin, count]) => `${origin} (${count})`)
     lines.push(`${scenario}: aborted requests to origins outside --allow-origin and --cdn-prefix: ${origins.join(', ')}`)
   }
+  if (prefetched.length) {
+    const scripts = prefetched.map(({path, routes}) => `${path} (${routes.join(', ')})`)
+    lines.push(`${scenario}: left out scripts that only router prefetches for other routes loaded: ${scripts.join(', ')}`)
+  }
   return lines.join('\n')
+}
+
+type Recorded = {path: string; url: string; functions: {ranges: {startOffset: number; endOffset: number; count: number}[]}[]}
+type Prefetched = {path: string; url: string; routes: string[]}
+
+// Whether a function other than the script's top level, the widest range, ran.
+const ranFunction = ({functions}: Recorded) => {
+  const width = ({ranges: [range]}: Recorded['functions'][number]) => range.endOffset - range.startOffset
+  const top = Math.max(...functions.map(width))
+  return functions.some((f) => f.ranges[0].count > 0 && width(f) < top)
+}
+
+// Scripts that only a router prefetch for another route loaded: a prefetch response names them, no document
+// or other RSC response does, and nothing in them ran beyond their top level, so none of their modules was
+// evaluated. A path matches as a whole segment suffix, which covers both `/_next/static/chunks/a.js` and
+// `static/chunks/a.js` for `chunks/a.js`.
+function prefetchedScripts(scripts: Recorded[], prefetches: {route: string; body: string}[], pageBodies: string[]) {
+  const found = new Map<string, Prefetched>()
+  for (const {path, url} of scripts) {
+    if (found.has(url)) continue
+    const named = new RegExp(`(?<![\\w.-])${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`)
+    const routes = [...new Set(prefetches.filter(({body}) => named.test(body)).map(({route}) => route))].sort()
+    const ran = scripts.some((script) => script.url === url && ranFunction(script))
+    if (routes.length && !ran && !pageBodies.some((body) => named.test(body))) found.set(url, {path, url, routes})
+  }
+  return [...found.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
 
 // Page errors that no allowPageErrors pattern tolerates fail the scenario.
@@ -376,7 +407,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
     const {context, page, cdp, errors, blocked, requests, state} = await open(browser, setup, {beforeunload: true})
 
     const failures: unknown[] = []
-    const scripts: {path: string; url: string; sha256: string; sourceMapSha256: string | null; functions: unknown[]}[] = []
+    const scripts: (Recorded & {sha256: string; sourceMapSha256: string | null})[] = []
     const excluded = new Set<string>()
     const verified = new Map<string, {sha256: string; sourceMapSha256: string | null}>()
     const record = async () => {
@@ -405,6 +436,27 @@ export async function collect(options: CaptureOptions & {out?: string}) {
       }
     }
 
+    // Bodies that name scripts: Next.js router prefetches (by route) and what the page itself requested.
+    const prefetches: {route: string; body: string}[] = []
+    const pageBodies: string[] = []
+    const reads: Promise<void>[] = []
+    page.on('response', (response) => {
+      const request = response.request()
+      const headers = request.headers()
+      const prefetch = 'next-router-prefetch' in headers
+      if (!prefetch && !('rsc' in headers) && !(request.isNavigationRequest() && response.frame() === page.mainFrame())) return
+      reads.push(
+        response.text().then(
+          (body) => {
+            if (prefetch) prefetches.push({route: new URL(request.url()).pathname, body})
+            else pageBodies.push(body)
+          },
+          // Redirects have no body to name scripts in.
+          () => {},
+        ),
+      )
+    })
+
     let snapshots = 0
     let queue = Promise.resolve()
     const snapshot = () =>
@@ -431,12 +483,15 @@ export async function collect(options: CaptureOptions & {out?: string}) {
     await snapshot()
     await cdp.send('Profiler.stopPreciseCoverage')
     if (failures.length) throw failures[0]
+    await Promise.all(reads)
+    const prefetched = prefetchedScripts(scripts, prefetches, pageBodies)
+    const recorded = scripts.filter(({url}) => !prefetched.some((script) => script.url === url))
     // Printed before the page error and expect checks, so a failing scenario still shows its final state.
-    console.warn(summary(scenario, page.url(), state, blocked, errors))
+    console.warn(summary(scenario, page.url(), state, blocked, errors, prefetched))
     checkErrors(setup, errors)
     await checkExpected(setup, page)
-    assert(scripts.length > 0, 'no scripts matched --prefix or --cdn-prefix')
-    scripts.sort((a, b) => a.path.localeCompare(b.path))
+    assert(recorded.length > 0, 'no scripts matched --prefix or --cdn-prefix')
+    recorded.sort((a, b) => a.path.localeCompare(b.path))
     const artifact = {
       schemaVersion: 1,
       scenario,
@@ -451,11 +506,12 @@ export async function collect(options: CaptureOptions & {out?: string}) {
       blockedOrigins: [...blocked.keys()].sort(),
       pageErrors: errors,
       excludedScripts: [...excluded].sort(),
-      scripts,
+      prefetchedScripts: prefetched,
+      scripts: recorded,
     }
     await mkdir(dirname(resolve(out)), {recursive: true})
     await writeFile(out, JSON.stringify(artifact, null, 2) + '\n')
-    console.log(`${scenario}: ${new Set(scripts.map((s) => s.path)).size} scripts, ${snapshots} snapshots -> ${out}`)
+    console.log(`${scenario}: ${new Set(recorded.map((s) => s.path)).size} scripts, ${snapshots} snapshots -> ${out}`)
     return artifact
   } finally {
     await browser.close()

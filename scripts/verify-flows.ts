@@ -59,9 +59,23 @@ const app = await listen(async (request, response) => {
   else if (request.url === '/error')
     html(response, `<script src="/assets/first.js"></script><script>Promise.reject(new Error('flaky request'))</script>`)
   else if (request.url === '/second') html(response, '<script src="/assets/second.js"></script>')
+  // Like a Next.js router, the page loads every script that a prefetch response names.
+  else if (request.url === '/prefetch')
+    html(
+      response,
+      `<script src="/p/shared.js"></script><script>Promise.all(['/about', '/tags'].map((route) => fetch(route + '?_rsc=1', {headers: {RSC: '1', 'Next-Router-Prefetch': '1'}}).then((r) => r.text()))).then((bodies) => { for (const src of new Set(bodies.join().match(/\\/p\\/[\\w.-]+/g))) if (!document.querySelector(\`script[src="\${src}"]\`)) document.head.append(Object.assign(document.createElement('script'), {src})) })</script>`,
+    )
+  else if (request.url === '/about?_rsc=1') response.end('1:I[7,["/p/other.js","/p/shared.js"],"About"]')
+  else if (request.url === '/tags?_rsc=1') response.end('1:I[8,["/p/other.js","/p/used.js"],"Tags"]')
+  else if (request.url!.startsWith('/p/')) script(response, await readFile(join(prefetchDir, request.url!.slice(3))))
   else if (request.url!.startsWith('/assets/')) script(response, await readFile(join(fixture, request.url!.slice(8))))
   else response.writeHead(404).end()
 })
+const prefetchDir = join(artifacts, 'prefetch')
+await mkdir(prefetchDir)
+await writeFile(join(prefetchDir, 'shared.js'), 'globalThis.shared = function shared() {}\n')
+await writeFile(join(prefetchDir, 'other.js'), 'globalThis.other = function other() {}\n')
+await writeFile(join(prefetchDir, 'used.js'), 'function used() {}\nused()\n')
 const actions = join(artifacts, 'flow.mjs')
 await writeFile(
   actions,
@@ -221,6 +235,45 @@ try {
     await browser.close()
   }
 
+  // A script that only router prefetches named and that ran nothing beyond its top level is left out. One the document
+  // also names or whose functions ran stays.
+  const {stderr: prefetchSummary} = await run(process.execPath, [
+    join(root, 'bin', 'coldpath.ts'),
+    'collect',
+    '--url',
+    `http://127.0.0.1:${(app.address() as AddressInfo).port}/prefetch`,
+    '--dir',
+    prefetchDir,
+    '--prefix',
+    '/p/',
+    '--wait-ms',
+    '0',
+    '--scenario',
+    'prefetch',
+    '--out',
+    join(artifacts, 'prefetch.coverage.json'),
+  ])
+  assert(
+    prefetchSummary.includes('prefetch: left out scripts that only router prefetches for other routes loaded: other.js (/about, /tags)'),
+    prefetchSummary,
+  )
+  const prefetch = JSON.parse(await readFile(join(artifacts, 'prefetch.coverage.json'), 'utf8'))
+  assert.deepEqual(prefetch.prefetchedScripts, [
+    {path: 'other.js', url: `http://127.0.0.1:${(app.address() as AddressInfo).port}/p/other.js`, routes: ['/about', '/tags']},
+  ])
+  assert.deepEqual([...new Set(prefetch.scripts.map((s: any) => s.path))].sort(), ['shared.js', 'used.js'])
+  const {stderr: prefetchAnalyzed} = await run(binary, [
+    '--dir',
+    prefetchDir,
+    '--coverage',
+    join(artifacts, 'prefetch.coverage.json'),
+    '--json',
+    join(artifacts, 'prefetch.json'),
+  ])
+  assert(prefetchAnalyzed.includes('recording warning: prefetch: the collector left out 1 scripts'), prefetchAnalyzed)
+  const prefetchReport = JSON.parse(await readFile(join(artifacts, 'prefetch.json'), 'utf8'))
+  assert.equal(prefetchReport.totals.unmeasuredBytes, prefetchReport.bundles.find((b: any) => b.path === 'other.js').bytes)
+
   // A CDN copy that differs from the local build is rejected like a stale local file.
   cdnSuffix = '\n'
   await assert.rejects(collect('stale', ['--cdn-prefix', cdnPrefix]), /browser\/disk source mismatch: cdn\.js/)
@@ -228,5 +281,5 @@ try {
   await Promise.all([app, cdn, api].map((server) => new Promise((resolve) => server.close(resolve))))
 }
 console.log(
-  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors and stale CDN rejection.',
+  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors, scripts loaded only by router prefetches and stale CDN rejection.',
 )
