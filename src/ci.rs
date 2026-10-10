@@ -175,38 +175,44 @@ pub fn markdown(report: &Report) -> String {
         }
     }
     if !report.recommendations.is_empty() {
-        out.push_str("\n## Review actions\n\nCompressed figures are isolated-fragment estimates, not additive transfer savings. Rebuild after changes to measure savings.\n\n| Source | Scenario | Action | Candidate B | Estimated gzip B | Evidence |\n| --- | --- | --- | ---: | ---: | --- |\n");
-        for row in report.recommendations.iter().take(20) {
-            let evidence = row
-                .import_path
-                .as_ref()
-                .map(|p| {
-                    p.edges
-                        .iter()
-                        .map(|e| {
-                            let loc = e
-                                .location
-                                .as_ref()
-                                .map(|l| format!(":{}:{}", l.line, l.column))
-                                .unwrap_or_default();
-                            format!("{}{loc} → {} ({:?})", e.from, e.to, e.kind)
-                        })
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                })
-                .unwrap_or_default();
+        let kinds = crate::recommendations::KINDS
+            .iter()
+            .map(|kind| {
+                let rows = report
+                    .recommendations
+                    .iter()
+                    .filter(|row| row.kind == *kind)
+                    .collect::<Vec<_>>();
+                (*kind, rows)
+            })
+            .filter(|(_, rows)| !rows.is_empty())
+            .collect::<Vec<_>>();
+        out.push_str(&format!(
+            "\n## Review actions\n\n{} actions: {}. Each table lists the {ACTION_ROWS} largest by candidate bytes; the JSON report lists every action. Compressed figures are isolated-fragment estimates, not additive transfer savings. Rebuild after changes to measure savings.\n",
+            report.recommendations.len(),
+            kinds
+                .iter()
+                .map(|(kind, rows)| format!("{} {kind}", rows.len()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        for (kind, rows) in kinds {
+            let application = rows
+                .iter()
+                .filter(|row| row.package == crate::attribution::APPLICATION)
+                .count();
             out.push_str(&format!(
-                "| {} | {} | {} | {} | {} | {} |\n",
-                escape_markdown(&row.source),
-                escape_markdown(row.scenario.as_deref().unwrap_or("all")),
-                row.kind,
-                row.bytes,
-                row.estimated_compression
-                    .as_ref()
-                    .map(|c| c.gzip_bytes.to_string())
-                    .unwrap_or_else(|| "—".into()),
-                escape_markdown(&format!("{} {}", row.explanation, evidence))
+                "\n### {kind}: {} on application code, {} on dependencies\n\n| Source | Package | Scenario | Candidate B | Estimated gzip B | Evidence |\n| --- | --- | --- | ---: | ---: | --- |\n",
+                application,
+                rows.len() - application
             ));
+            review_rows(&mut out, &rows);
+            if rows.len() > ACTION_ROWS {
+                out.push_str(&format!(
+                    "\n{} more {kind} actions are in the JSON report.\n",
+                    rows.len() - ACTION_ROWS
+                ));
+            }
         }
     }
     if let Some(comparison) = &report.baseline {
@@ -261,6 +267,44 @@ pub fn markdown(report: &Report) -> String {
         ));
     }
     out
+}
+
+/// Rows per action kind in the Markdown review tables.
+const ACTION_ROWS: usize = 10;
+
+fn review_rows(out: &mut String, rows: &[&crate::recommendations::Recommendation]) {
+    for row in rows.iter().take(ACTION_ROWS) {
+        let evidence = row
+            .import_path
+            .as_ref()
+            .map(|p| {
+                p.edges
+                    .iter()
+                    .map(|e| {
+                        let loc = e
+                            .location
+                            .as_ref()
+                            .map(|l| format!(":{}:{}", l.line, l.column))
+                            .unwrap_or_default();
+                        format!("{}{loc} → {} ({:?})", e.from, e.to, e.kind)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} |\n",
+            escape_markdown(&row.source),
+            escape_markdown(&row.package),
+            escape_markdown(row.scenario.as_deref().unwrap_or("all")),
+            row.bytes,
+            row.estimated_compression
+                .as_ref()
+                .map(|c| c.gzip_bytes.to_string())
+                .unwrap_or_else(|| "—".into()),
+            escape_markdown(&format!("{} {}", row.explanation, evidence))
+        ));
+    }
 }
 
 fn milliseconds(us: f64) -> String {
