@@ -3,6 +3,7 @@ import {mkdir, mkdtemp, readFile, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import webpack from 'webpack'
+import {exportGraph} from '../lib/export-graph.ts'
 import {enrichLocations, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
 import ColdpathGraphPlugin from '../lib/webpack.ts'
 
@@ -26,6 +27,23 @@ try {
   assert.equal(graph.edges[0].location!.line, 1)
   assert.equal(graph.edges[0].locationEvidence, 'parsed-source')
   assert.match(graph.modules[0].sourceSha256!, /^[a-f0-9]{64}$/)
+  // The export records its root relative to the graph file, and a root that holds none of the importers is an error (#54).
+  const metafile = join(root, 'meta.json')
+  await writeFile(
+    metafile,
+    JSON.stringify({
+      inputs: {'entry.js': {imports: [{path: 'chart.js', kind: 'import-statement', original: './chart.js'}]}, 'chart.js': {imports: []}},
+      outputs: {'out.js': {entryPoint: 'entry.js', inputs: {'entry.js': {bytesInOutput: 10}, 'chart.js': {bytesInOutput: 5}}}},
+    }),
+  )
+  const exported = await exportGraph({format: 'esbuild', input: metafile, root, out: join(root, 'out/graph.json')})
+  assert.equal(exported.root, '..')
+  assert.equal(JSON.parse(await readFile(join(root, 'out/graph.json'), 'utf8')).root, '..')
+  await mkdir(join(root, 'empty'))
+  await assert.rejects(
+    exportGraph({format: 'esbuild', input: metafile, root: join(root, 'empty'), out: join(root, 'out/wrong.json')}),
+    /none of the 1 importing modules exists under .*empty \(such as entry\.js\); pass the bundler's root/,
+  )
   const sites = importSites(
     "import type {A} from 'a'; import {type B} from 'b'; export type {C} from 'c'; import {D} from 'd'; import('e'); require('f');",
     'source.ts',
@@ -167,6 +185,7 @@ try {
   }
   const cold = await buildGraph()
   assert.equal(await buildGraph(), cold, 'modules restored from the webpack cache must stay in the graph')
+  assert.equal(JSON.parse(cold).root, '..', 'the plugin records webpack context relative to the output directory')
 
   // A concatenated inner module keeps every importer, not only webpack's first issuer, which can differ
   // between identical builds (#44).
@@ -248,7 +267,7 @@ try {
   )
   assert(edgeList(orphans('main', [])).includes('0:page unknown 0:inner'))
   console.log(
-    'Verified import declaration/use distinction, type-only imports, source snapshot evidence, malformed native graph rejection, Turbopack import/require separation and webpack graphs from a warm cache.',
+    'Verified import declaration/use distinction, type-only imports, source snapshot evidence, recorded graph roots, wrong export root rejection, malformed native graph rejection, Turbopack import/require separation and webpack graphs from a warm cache.',
   )
 } finally {
   await rm(root, {recursive: true, force: true})

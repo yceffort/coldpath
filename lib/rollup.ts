@@ -1,5 +1,5 @@
-import {resolve} from 'node:path'
-import {importSites, sha256, sourcePath} from './graph.ts'
+import {dirname, join, resolve} from 'node:path'
+import {graphRoot, importSites, sha256, sourcePath} from './graph.ts'
 import type {GraphEdge, GraphModule, ImportKind, ImportSite} from './graph.ts'
 
 // The parts of the Rollup and Rolldown plugin APIs used here, so the types need neither package.
@@ -36,7 +36,7 @@ export default function coldpathGraph({fileName = 'coldpath.graph.json', root = 
       }
       return null
     },
-    async generateBundle(this: PluginContext, _options: unknown, bundle: OutputBundle) {
+    async generateBundle(this: PluginContext, options: {dir?: string; file?: string}, bundle: OutputBundle) {
       const ids = [...this.getModuleIds()]
       const sizes = new Map<string, number>(),
         chunks = new Map<string, string[]>()
@@ -77,7 +77,10 @@ export default function coldpathGraph({fileName = 'coldpath.graph.json', root = 
           if (!located.has(to) && !this.getModuleInfo(to)?.isExternal) edges.push({from: id, to, kind})
         }
       }
-      this.emitFile({type: 'asset', fileName, source: JSON.stringify({schemaVersion: 1, bundler, modules, edges, warnings})})
+      // The asset is written to the output directory; without one, no root is recorded.
+      const dir = options.dir ?? (options.file && dirname(options.file))
+      const recorded = dir ? {root: graphRoot(root, join(resolve(dir), fileName))} : {}
+      this.emitFile({type: 'asset', fileName, source: JSON.stringify({schemaVersion: 1, bundler, ...recorded, modules, edges, warnings})})
     },
   }
 }

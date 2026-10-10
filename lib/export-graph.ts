@@ -1,6 +1,6 @@
 import {readFile, writeFile, mkdir, stat} from 'node:fs/promises'
 import {resolve, dirname, join} from 'node:path'
-import {esbuildGraph, webpackGraph, turbopackGraph, enrichLocations} from './graph.ts'
+import {esbuildGraph, webpackGraph, turbopackGraph, enrichLocations, graphRoot} from './graph.ts'
 
 export async function exportGraph({
   format,
@@ -32,6 +32,7 @@ export async function exportGraph({
         ? webpackGraph(JSON.parse(bytes as unknown as string), root)
         : esbuildGraph(JSON.parse(bytes as unknown as string), root)
   await enrichLocations(graph, root)
+  graph.root = graphRoot(root, out)
   await mkdir(dirname(resolve(out)), {recursive: true})
   await writeFile(out, JSON.stringify(graph) + '\n')
   console.log(
