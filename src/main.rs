@@ -118,6 +118,11 @@ struct Args {
     why: Option<String>,
     #[arg(long, default_value_t = 20)]
     limit: usize,
+    /// Aggregate sources under the shortest leading path a glob matches, such as
+    /// '**/src/features/*'. Repeatable; the first matching glob wins.
+    #[arg(long)]
+    #[serde(default)]
+    group_by: Vec<String>,
     /// Also copy every input this analysis read, with a manifest, into a new directory.
     #[arg(long, conflicts_with = "replay")]
     #[serde(skip)]
@@ -148,6 +153,7 @@ impl Args {
             args.max_added_unobserved_bytes,
         ) = (None, None, None);
         (args.details, args.why, args.limit) = (false, None, 20);
+        args.group_by = Vec::new();
         Ok(serde_json::to_value(args)?)
     }
 
@@ -193,7 +199,7 @@ fn replay_args(cli: &Args, dir: &Path) -> Result<(Args, coldpath::evidence::Mani
     let bare = Args::parse_from(["coldpath", "--replay", "."]);
     ensure!(
         cli.analysis()? == bare.analysis()?,
-        "--replay takes only output options (--json, --html, --treemap, --tsv, --markdown, --details, --limit)"
+        "--replay takes only output options (--json, --html, --treemap, --tsv, --markdown, --details, --limit, --group-by)"
     );
     let manifest = coldpath::evidence::open(dir)?;
     let mut args: Args = serde_json::from_value(manifest.invocation.clone())
@@ -214,6 +220,7 @@ fn replay_args(cli: &Args, dir: &Path) -> Result<(Args, coldpath::evidence::Mani
         cli.markdown.clone(),
     );
     (args.details, args.limit, args.replay) = (cli.details, cli.limit, cli.replay.clone());
+    args.group_by.clone_from(&cli.group_by);
     Ok((args, manifest))
 }
 
@@ -573,6 +580,7 @@ fn main() -> Result<()> {
         coldpath::annotations::attach_loading(&mut report, &fs::read(path)?)?;
     }
     report.recommendations = coldpath::recommendations::build(&report);
+    coldpath::group_sources(&mut report, &args.group_by)?;
     if let Some(out) = &args.export {
         export(
             out,
@@ -729,6 +737,25 @@ fn main() -> Result<()> {
             row.counts.unmeasured_bytes,
             row.package
         );
+    }
+    if !args.group_by.is_empty() {
+        status!(
+            "\n{:>12} {:>12} {:>12} {:>12}  Group",
+            "Bytes",
+            "Observed",
+            "Unobserved",
+            "Unmeasured"
+        );
+        for row in report.groups.iter().take(args.limit) {
+            status!(
+                "{:>12} {:>12} {:>12} {:>12}  {}",
+                row.counts.bytes,
+                row.counts.observed_bytes,
+                row.counts.unobserved_bytes,
+                row.counts.unmeasured_bytes,
+                row.group
+            );
+        }
     }
     if let Some(source) = &args.why {
         let row = why_row(report.import_paths.as_ref().unwrap(), source, args.limit)?;

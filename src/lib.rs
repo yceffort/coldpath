@@ -61,6 +61,19 @@ pub struct SourceRow {
     pub counts: Counts,
 }
 
+/// Sources aggregated by `--group-by`: the shortest leading part of their paths that a glob matches.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupRow {
+    pub group: String,
+    pub pattern: String,
+    pub sources: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_compression: Option<ci::CompressedSizes>,
+    #[serde(flatten)]
+    pub counts: Counts,
+}
+
 /// A source shipped in more than one bundle. Independent of coverage: a copy can be needed and executed.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -256,6 +269,8 @@ pub struct Report {
     pub bundles: Vec<BundleRow>,
     pub sources: Vec<SourceRow>,
     pub packages: Vec<PackageRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<GroupRow>,
     pub warnings: Vec<String>,
     /// What the collector reported about the recorded page state: aborted origins and
     /// tolerated page errors. The numbers describe that state.
@@ -452,6 +467,7 @@ pub fn analyze_with_options(
         bundles: Vec::new(),
         sources: Vec::new(),
         packages: Vec::new(),
+        groups: Vec::new(),
         warnings,
         recording_warnings,
         excluded_bundles: Vec::new(),
@@ -1018,6 +1034,60 @@ pub fn analyze_with_options(
     report.warnings.sort();
     report.warnings.dedup();
     Ok(report)
+}
+
+/// Groups sources by the shortest leading part of their path that a pattern matches, trying the
+/// patterns in order. `*` does not cross `/`; `**` does. Unmatched sources belong to no group.
+pub fn group_sources(report: &mut Report, patterns: &[String]) -> Result<()> {
+    let globs = patterns
+        .iter()
+        .map(|pattern| {
+            globset::GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .build()
+                .map(|glob| glob.compile_matcher())
+                .with_context(|| format!("invalid --group-by glob {pattern:?}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut groups: BTreeMap<&str, GroupRow> = BTreeMap::new();
+    for source in &report.sources {
+        let name = source.source.as_str();
+        let prefixes = || {
+            name.match_indices('/')
+                .map(|(end, _)| &name[..end])
+                .chain([name])
+        };
+        let Some((group, pattern)) = globs.iter().zip(patterns).find_map(|(glob, pattern)| {
+            prefixes()
+                .find(|prefix| glob.is_match(prefix))
+                .map(|prefix| (prefix, pattern))
+        }) else {
+            continue;
+        };
+        let row = groups.entry(group).or_insert_with(|| GroupRow {
+            group: group.into(),
+            pattern: pattern.clone(),
+            sources: 0,
+            estimated_compression: None,
+            counts: Counts::default(),
+        });
+        row.sources += 1;
+        row.counts.add(&source.counts);
+        if let Some(estimate) = &source.estimated_compression {
+            row.estimated_compression
+                .get_or_insert_with(Default::default)
+                .add(estimate);
+        }
+    }
+    let mut groups = groups.into_values().collect::<Vec<_>>();
+    groups.sort_by(|a, b| {
+        b.counts
+            .bytes
+            .cmp(&a.counts.bytes)
+            .then(a.group.cmp(&b.group))
+    });
+    report.groups = groups;
+    Ok(())
 }
 
 fn aggregate_sources(source_counts: BTreeMap<String, Counts>) -> (Vec<SourceRow>, Vec<PackageRow>) {
