@@ -187,9 +187,11 @@ try {
   await stale.close()
 }
 const flows = join(root, 'fixtures', 'flows')
+let header: string | undefined
 const pages = createServer(async (request, response) => {
   const html = (body: string) =>
     response.setHeader('content-type', 'text/html; charset=utf-8').end(`<!doctype html><meta charset="utf-8">${body}`)
+  if (request.url === '/') header = request.headers['x-coldpath'] as string | undefined
   if (request.url === '/')
     html('<script src="/assets/first.js"></script><a href="/second">next</a><a href="/download">download</a><a href="/empty">empty</a>')
   else if (request.url === '/second') html('<script src="/assets/second.js"></script>')
@@ -246,8 +248,14 @@ try {
   })
   await coldpath('profile', '--scenarios', 'stay.scenarios.json', '--runs', '2')
   assert.deepEqual(Object.keys((await read('stay-out/stay.profile.json')).windows), ['load', 'action'])
-  // Network and browser options from the scenario file reach profile runs and their recorded environment.
-  await scenarios('options.scenarios.json', {
+  // Network, browser, and page state options from the scenario file reach profile runs and their recorded environment.
+  await writeFile(
+    join(work, 'tolerate.mjs'),
+    `export async function setup({page}) {
+  await page.addInitScript(() => setTimeout(() => { throw new Error('tolerated') }))
+}\n`,
+  )
+  const options = {
     url,
     dir: flows,
     prefix: '/assets/',
@@ -255,12 +263,28 @@ try {
     out: 'options-out',
     allowOrigins: ['https://api.example.com/'],
     browserChannel: 'chromium',
-    scenarios: [{name: 'initial'}],
-  })
+    extraHTTPHeaders: {'x-coldpath': 'secret-value'},
+    expect: 'role=link[name="next"]',
+    allowPageErrors: ['^tolerated$'],
+    scenarios: [{name: 'initial', actions: 'tolerate.mjs'}],
+  }
+  await scenarios('options.scenarios.json', options)
   await coldpath('profile', '--scenarios', 'options.scenarios.json', '--runs', '2')
-  const options = (await read('options-out/initial.profile.json')).environment
-  assert.deepEqual(options.allowedOrigins, ['https://api.example.com'])
-  assert.equal(options.browserChannel, 'chromium')
+  const recorded = await read('options-out/initial.profile.json')
+  assert.deepEqual(recorded.environment.allowedOrigins, ['https://api.example.com'])
+  assert.equal(recorded.environment.browserChannel, 'chromium')
+  assert.deepEqual(recorded.environment.extraHTTPHeaders, ['x-coldpath'])
+  assert.equal(header, 'secret-value')
+  assert(!JSON.stringify(recorded).includes('secret-value'))
+  assert.deepEqual(recorded.pageErrors, ['tolerated'])
+  assert.match(recorded.environment.observation, /; setup before navigation; load window:/)
+  await scenarios('expect.scenarios.json', {...options, expect: 'text=missing'})
+  await assert.rejects(
+    coldpath('profile', '--scenarios', 'expect.scenarios.json', '--runs', '2'),
+    /no visible element matches expect "text=missing"/,
+  )
+  await scenarios('strict.scenarios.json', {...options, allowPageErrors: undefined})
+  await assert.rejects(coldpath('profile', '--scenarios', 'strict.scenarios.json', '--runs', '2'), /page threw 1 runtime errors/)
   await scenarios('worker.scenarios.json', {
     url,
     dir: flows,
