@@ -27,7 +27,7 @@
     "dev:ui": "vite -c ui/vite.config.ts",
     "prepack": "node --run build:js",
     "test": "cargo test --locked && pnpm test:browser && pnpm test:corpus && pnpm test:package",
-    "test:corpus": "node --run build:js && node scripts/verify-label-score.ts && node scripts/verify-graphs.ts && node scripts/verify-corpus.ts && node scripts/verify-recovery.ts",
+    "test:corpus": "node --run build:js && node scripts/verify-label-score.ts && node scripts/verify-graphs.ts && node scripts/verify-corpus.ts && node scripts/verify-next-prefetch.ts && node scripts/verify-recovery.ts",
     "test:browser": "node --run build:js && node scripts/verify.ts && node scripts/verify-formats.ts && node scripts/verify-collector.ts && node scripts/verify-environment.ts && node scripts/verify-flows.ts && node scripts/verify-treemap.ts && node scripts/verify-comparison.ts && node scripts/verify-inferred.ts && node scripts/verify-profile.ts",
     "collect": "node bin/coldpath.ts collect",
     "test:package": "node scripts/verify-package.ts",
