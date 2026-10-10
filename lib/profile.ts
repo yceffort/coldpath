@@ -7,7 +7,7 @@ import {cpus} from 'node:os'
 import {dirname, resolve} from 'node:path'
 import {promisify} from 'node:util'
 
-import {checkErrors, checkScript, environment, open, prepare, verifyScript} from './collect.ts'
+import {checkErrors, checkExpected, checkScript, environment, open, prepare, verifyScript} from './collect.ts'
 import type {CaptureOptions, Setup} from './collect.ts'
 
 // The fields of a CDP Profiler.Profile that are read.
@@ -178,6 +178,7 @@ async function measure(entry: Entry) {
     }
     assert.equal(documents, 1, 'coldpath profile does not support multi-document navigation flows; profile each page as its own scenario')
     checkErrors(setup, errors)
+    await checkExpected(setup, page)
 
     // A `//# sourceURL` comment replaces `url`; `embedderName` keeps the URL the script came from.
     const urls = new Map<string, string>()
@@ -206,7 +207,7 @@ async function measure(entry: Entry) {
     assert(scripts.size > 0, 'no scripts matched --prefix or --cdn-prefix')
     const windows = Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [name, reduce(profile, scripts)]))
     entry.environment ??= await environment(browser, page, setup)
-    return {windows, scripts: [...scripts.values()], blocked, errors, workers}
+    return {windows, scripts: [...scripts.values()], blocked: [...blocked.keys()], errors, workers}
   } finally {
     await browser.close()
   }

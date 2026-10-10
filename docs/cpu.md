@@ -12,7 +12,7 @@ coldpath can add a CPU axis to the same sources it already explains: per-source 
 coldpath profile --scenarios coldpath.scenarios.json [--runs N]
 ```
 
-`profile` reads the same [scenario file](collecting.md#scenario-files) as `collect`, including device, network, CPU throttling, and storage state, and writes `<out>/<name>.profile.json` next to the coverage files. Each run is a fresh browser. Only the V8 sampling profiler runs while a window is measured; the collector enables the debugger after profiling stops and then checks every loaded script under `--prefix` or `--cdn-prefix` against the file in `dir` with SHA-256, as `collect` does; a sampled script that V8 already discarded, such as one that ran once, is checked from its network response. A stale build fails the run, and so does a run in which no script matches the prefixes.
+`profile` reads the same [scenario file](collecting.md#scenario-files) as `collect`, including device, network, CPU throttling, storage state, extra headers, an actions module's `setup`, and the [page state checks](collecting.md#checking-the-page-state), and writes `<out>/<name>.profile.json` next to the coverage files. `setup` runs before each run's load window. Each run is a fresh browser. Only the V8 sampling profiler runs while a window is measured; the collector enables the debugger after profiling stops and then checks every loaded script under `--prefix` or `--cdn-prefix` against the file in `dir` with SHA-256, as `collect` does; a sampled script that V8 already discarded, such as one that ran once, is checked from its network response. A stale build fails the run, and so does a run in which no script matches the prefixes.
 
 Each run records two windows:
 

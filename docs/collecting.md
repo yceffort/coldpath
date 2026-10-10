@@ -92,7 +92,7 @@ coldpath collect --scenarios coldpath.scenarios.json
 coldpath analyze --scenarios coldpath.scenarios.json --html artifacts/combined.html
 ```
 
-`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`), and `coldpath profile` writes `<out>/<name>.profile.json` from the same file ([CPU cost](cpu.md)). `analyze` adds `--dir`, one `--coverage` per scenario, `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, the [environment options](#device-throttling-and-authenticated-state), and [`allowPageErrors`](#checking-the-page-state) can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
+`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`), and `coldpath profile` writes `<out>/<name>.profile.json` from the same file ([CPU cost](cpu.md)). `analyze` adds `--dir`, one `--coverage` per scenario, `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, the [environment options](#device-throttling-and-authenticated-state), and the [page state checks](#checking-the-page-state) `expect` and `allowPageErrors` can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
 
 ## Device, throttling, and authenticated state
 
@@ -142,9 +142,18 @@ A scenario that calls an API or loads other resources from another origin needs 
 
 ## Checking the page state
 
+Coverage numbers describe the page the browser showed, which can be an error or loading screen when a request was blocked or failed. After each scenario, `collect` prints the final URL, the status of the last main document response, and the numbers of console errors and page errors to stderr, plus the number of aborted requests per origin when the [origin policy](#other-origins) blocked any:
+
+```text
+initial: final page http://127.0.0.1:3000/dashboard (document status 200), 2 console errors, 0 page errors
+initial: aborted requests to origins outside --allow-origin and --cdn-prefix: https://api.example.com (3)
+```
+
+`expect` (`--expect SELECTOR`, repeatable) lists [Playwright selectors](https://playwright.dev/docs/other-locators) that must each match a visible element at the end of the scenario, such as `"expect": ["role=heading[name=\"Dashboard\"]", "text=Weekly orders", "main .chart"]`. The check runs once, without waiting, so the observation window stays as configured; actions should wait for what they need. A missing element fails the scenario, and nothing is written.
+
 A page error (an uncaught exception or an unhandled promise rejection) fails the scenario by default. `allowPageErrors: true` tolerates every page error; a list of regular expressions (`--allow-page-error REGEX`, repeatable) tolerates errors whose message matches one of them. Tolerated errors stay in the envelope's `pageErrors`, and other errors still fail the scenario with their messages.
 
-`profile` applies `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`.
+`profile` applies `expect` and `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`.
 
 ## Unsupported: workers
 

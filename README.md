@@ -269,7 +269,7 @@ coldpath collect \
   --out artifacts/initial.coverage.json
 ```
 
-For Next.js, use the build's static output directory with `--prefix /_next/static/`. The collector accepts a local action module for clicks, searches, and other interactions. See [collecting coverage](docs/collecting.md) for the action API, capture scope, and source-map limitations.
+For Next.js, use the build's static output directory with `--prefix /_next/static/`. The collector accepts a local action module for clicks, searches, and other interactions. It prints the final page state and any requests it blocked, and `--expect SELECTOR` fails the recording when the page does not show what the scenario expects, such as after an API call failed. See [collecting coverage](docs/collecting.md) for the action API, page state checks, capture scope, and source-map limitations.
 
 ## Measure CPU cost
 

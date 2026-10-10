@@ -25,6 +25,7 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
     const option = (key: string) => scenario[key] ?? config[key]
     const storageState = option('storageState')
     const browserPath = option('browserPath')
+    const expect = option('expect')
     return {
       device: option('device'),
       viewport: option('viewport'),
@@ -38,6 +39,7 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
       allowOrigins: option('allowOrigins'),
       storageState: storageState && resolve(base, storageState),
       extraHTTPHeaders: option('extraHTTPHeaders'),
+      expect: typeof expect === 'string' ? [expect] : expect,
       allowPageErrors: option('allowPageErrors'),
       browserPath: browserPath && resolve(base, browserPath),
       browserChannel: option('browserChannel'),

@@ -35,6 +35,8 @@ export interface CaptureOptions {
   cpuSlowdown?: number
   storageState?: string
   extraHTTPHeaders?: Record<string, string>
+  // Playwright selectors that must match a visible element in the final page state.
+  expect?: string[]
   // true, or regular expressions that a tolerated page error's message matches.
   allowPageErrors?: boolean | string[]
   browserPath?: string
@@ -90,6 +92,7 @@ export async function prepare(
     cpuSlowdown,
     storageState,
     extraHTTPHeaders,
+    expect = [],
     allowPageErrors = false,
     browserPath,
     browserChannel,
@@ -136,6 +139,10 @@ export async function prepare(
     extraHTTPHeaders === undefined ||
       (typeof extraHTTPHeaders === 'object' && Object.values(extraHTTPHeaders).every((value) => typeof value === 'string')),
     'extraHTTPHeaders must map header names to strings',
+  )
+  assert(
+    Array.isArray(expect) && expect.every((selector) => typeof selector === 'string' && selector.trim()),
+    'expect must list Playwright selectors',
   )
   assert(
     typeof allowPageErrors === 'boolean' || (Array.isArray(allowPageErrors) && allowPageErrors.every((p) => typeof p === 'string')),
@@ -191,6 +198,7 @@ export async function prepare(
     cpuSlowdown,
     storageState,
     extraHTTPHeaders,
+    expect,
     tolerated,
     browserPath,
     browserChannel,
@@ -214,7 +222,8 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
     ...(storageState ? {storageState: resolve(storageState)} : {}),
     ...(extraHTTPHeaders ? {extraHTTPHeaders} : {}),
   })
-  const blocked = new Set<string>()
+  // Aborted requests per origin.
+  const blocked = new Map<string, number>()
   const requests: {path: string; type: string}[] = []
   await context.route('**/*', (route) => {
     const url = new URL(route.request().url())
@@ -225,7 +234,7 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
       })
       return route.continue()
     }
-    blocked.add(url.origin)
+    blocked.set(url.origin, (blocked.get(url.origin) ?? 0) + 1)
     return route.abort()
   })
   // A listener makes Chromium dispatch beforeunload, where the debugger pauses the
@@ -234,6 +243,14 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   const page = await context.newPage()
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
+  // What the page ended up showing: the last main document response and console errors.
+  const state = {status: null as number | null, consoleErrors: 0}
+  page.on('response', (response) => {
+    if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) state.status = response.status()
+  })
+  page.on('console', (message) => {
+    if (message.type() === 'error') state.consoleErrors++
+  })
   const cdp = await context.newCDPSession(page)
   if (network) {
     await cdp.send('Network.enable')
@@ -246,7 +263,25 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   }
   if (cpuSlowdown) await cdp.send('Emulation.setCPUThrottlingRate', {rate: cpuSlowdown})
   if (beforeNavigation) await beforeNavigation({page, context})
-  return {context, page, cdp, errors, blocked, requests}
+  return {context, page, cdp, errors, blocked, requests, state}
+}
+
+// The state the recording describes, so that an error or loading screen does not pass as the application.
+function summary(
+  scenario: string,
+  url: string,
+  state: {status: number | null; consoleErrors: number},
+  blocked: Map<string, number>,
+  errors: string[],
+) {
+  const lines = [
+    `${scenario}: final page ${url} (document status ${state.status ?? 'none'}), ${state.consoleErrors} console errors, ${errors.length} page errors`,
+  ]
+  if (blocked.size) {
+    const origins = [...blocked].sort(([a], [b]) => a.localeCompare(b)).map(([origin, count]) => `${origin} (${count})`)
+    lines.push(`${scenario}: aborted requests to origins outside --allow-origin and --cdn-prefix: ${origins.join(', ')}`)
+  }
+  return lines.join('\n')
 }
 
 // Page errors that no allowPageErrors pattern tolerates fail the scenario.
@@ -255,6 +290,16 @@ export function checkErrors(setup: Setup, errors: string[]) {
   assert(
     !failed.length,
     `page threw ${failed.length} runtime errors (allow expected ones with allowPageErrors or --allow-page-error):\n${failed.map((message) => `  ${message}`).join('\n')}`,
+  )
+}
+
+// Every expect selector must match a visible element; checked without waiting, after the scenario ends.
+export async function checkExpected(setup: Setup, page: Page) {
+  const missing = []
+  for (const selector of setup.expect) if (!(await page.locator(`${selector} >> visible=true`).count())) missing.push(selector)
+  assert(
+    !missing.length,
+    `${setup.scenario}: no visible element matches expect ${missing.map((s) => JSON.stringify(s)).join(', ')} on the final page ${page.url()}`,
   )
 }
 
@@ -328,7 +373,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
 
   const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
-    const {context, page, cdp, errors, blocked, requests} = await open(browser, setup, {beforeunload: true})
+    const {context, page, cdp, errors, blocked, requests, state} = await open(browser, setup, {beforeunload: true})
 
     const failures: unknown[] = []
     const scripts: {path: string; url: string; sha256: string; sourceMapSha256: string | null; functions: unknown[]}[] = []
@@ -386,7 +431,10 @@ export async function collect(options: CaptureOptions & {out?: string}) {
     await snapshot()
     await cdp.send('Profiler.stopPreciseCoverage')
     if (failures.length) throw failures[0]
+    // Printed before the page error and expect checks, so a failing scenario still shows its final state.
+    console.warn(summary(scenario, page.url(), state, blocked, errors))
     checkErrors(setup, errors)
+    await checkExpected(setup, page)
     assert(scripts.length > 0, 'no scripts matched --prefix or --cdn-prefix')
     scripts.sort((a, b) => a.path.localeCompare(b.path))
     const artifact = {
@@ -400,7 +448,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
       },
       url: target.href,
       requests,
-      blockedOrigins: [...blocked].sort(),
+      blockedOrigins: [...blocked.keys()].sort(),
       pageErrors: errors,
       excludedScripts: [...excluded].sort(),
       scripts,
