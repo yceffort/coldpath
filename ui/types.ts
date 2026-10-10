@@ -165,6 +165,7 @@ export interface Report {
   recommendations: Recommendation[]
   inspectorHtml?: string
   warnings: string[]
+  recordingWarnings?: string[]
   excludedBundles: string[]
   budgetFailures: string[]
   compression: Compression | null

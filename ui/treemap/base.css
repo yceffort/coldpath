@@ -3,6 +3,7 @@
 /* --s0 to --s4 fill tiles by the share of their bytes that never ran, in five steps; --t0 to --t4 are their text. */
 :root {
   color-scheme: light dark;
+  --warning: var(--focus);
   --bg: #eef1f4;
   --panel: #fff;
   --raised: #f6f8fa;

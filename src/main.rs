@@ -755,6 +755,9 @@ fn main() -> Result<()> {
             );
         }
     }
+    for warning in &report.recording_warnings {
+        eprintln!("recording warning: {warning}");
+    }
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
     }

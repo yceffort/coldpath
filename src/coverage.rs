@@ -17,6 +17,12 @@ pub struct CoverageFile {
     pub schema_version: u32,
     pub scenario: String,
     pub scripts: Vec<ScriptCoverage>,
+    /// Origins the collector aborted requests to.
+    #[serde(default)]
+    pub blocked_origins: Vec<String>,
+    /// Page errors that `allowPageErrors` tolerated.
+    #[serde(default)]
+    pub page_errors: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

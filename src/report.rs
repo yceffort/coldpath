@@ -17,6 +17,7 @@ struct HtmlReport<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     inspector_html: Option<String>,
     warnings: &'a [String],
+    recording_warnings: &'a [String],
     excluded_bundles: &'a [String],
     budget_failures: &'a [String],
     compression: &'a Option<crate::ci::CompressedSizes>,
@@ -109,6 +110,7 @@ pub fn html(report: &Report) -> Result<String> {
         recommendations: &report.recommendations,
         inspector_html: None,
         warnings: &report.warnings,
+        recording_warnings: &report.recording_warnings,
         excluded_bundles: &report.excluded_bundles,
         budget_failures: &report.budget_failures,
         compression: &report.compression,
@@ -187,6 +189,7 @@ pub fn treemap_with_inspector(report: &Report, include_inspector: bool) -> Resul
             None
         },
         warnings: &report.warnings,
+        recording_warnings: &report.recording_warnings,
         excluded_bundles: &report.excluded_bundles,
         budget_failures: &report.budget_failures,
         compression: &report.compression,

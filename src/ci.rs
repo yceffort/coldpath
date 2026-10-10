@@ -135,6 +135,12 @@ pub fn markdown(report: &Report) -> String {
         report.totals.unobserved_bytes,
         report.totals.unmeasured_bytes
     );
+    if !report.recording_warnings.is_empty() {
+        out.push_str("\n> [!WARNING]\n> The collector reported page state problems. These numbers describe the page as it was recorded.\n>\n");
+        for warning in &report.recording_warnings {
+            out.push_str(&format!("> - {}\n", escape_markdown(warning)));
+        }
+    }
     if let Some(c) = &report.compression {
         out.push_str(&format!("\nSum of independently compressed bundles: gzip (level 6) **{} B**, Brotli (quality 5, lgwin 22) **{} B**. These are not estimates of removable bytes or actual server encoding.\n", c.gzip_bytes, c.brotli_bytes));
     }

@@ -932,3 +932,54 @@ fn evidence_excerpt_replays_selected_bundles_and_lists_what_it_omits() {
     assert_eq!(changed.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&changed.stderr).contains("tree/site/b.js no longer matches"));
 }
+
+#[test]
+fn recording_warnings_report_aborted_origins_and_tolerated_page_errors() {
+    let f = Fixture::new();
+    let source = "abcd";
+    f.write("app.js", source);
+    f.map(&["src/a.js"]);
+    let path = f.coverage(
+        "initial",
+        source,
+        json!([{"startOffset":0,"endOffset":4,"count":1}]),
+    );
+    let mut envelope: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    envelope["blockedOrigins"] = json!(["https://api.example.com"]);
+    envelope["pageErrors"] = json!(["flaky request", "second", "third", "fourth"]);
+    fs::write(&path, envelope.to_string()).unwrap();
+    f.coverage(
+        "older",
+        source,
+        json!([{"startOffset":0,"endOffset":4,"count":1}]),
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--dir", ".", "--coverage", "initial", "--coverage", "older"])
+        .args(["--json", "-", "--markdown", "summary.md"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["recordingWarnings"],
+        json!([
+            "initial: the collector aborted requests to https://api.example.com because they are not --allow-origin or --cdn-prefix origins, so the recording shows the page without those responses",
+            "initial: allowPageErrors tolerated 4 page errors during collection: \"flaky request\", \"second\", \"third\", ..."
+        ])
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains(
+        "recording warning: initial: the collector aborted requests to https://api.example.com"
+    ));
+    let md = fs::read_to_string(f.0.join("summary.md")).unwrap();
+    let notes = md.find("> [!WARNING]\n> The collector reported page state problems.");
+    assert!(
+        notes.is_some_and(|at| at < md.find("| Package |").unwrap()),
+        "{md}"
+    );
+    assert!(md.contains("> - initial: allowPageErrors tolerated 4 page errors"));
+}

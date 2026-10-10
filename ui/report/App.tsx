@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import {useLayoutEffect, useRef, useState} from 'react'
 import {classes} from '../classes.ts'
+import {RecordingWarnings} from '../RecordingWarnings.tsx'
 import type {Report} from '../types.ts'
 import {Explorer} from './Explorer.tsx'
 import {number, size, sizeParts} from './format.ts'
@@ -125,6 +126,7 @@ export function App({report}: {report: Report}) {
     <main {...stylex.props(styles.main)}>
       <Header meta={report.bundles.length + ' chunks'} />
       <p {...stylex.props(styles.intro)}>Follow unobserved code back to its source.</p>
+      <RecordingWarnings warnings={report.recordingWarnings} />
       <div id="summary" {...stylex.props(styles.summary)}>
         {(
           [

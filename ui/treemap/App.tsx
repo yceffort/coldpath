@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import {useLayoutEffect, useMemo, useRef, useState} from 'react'
+import {RecordingWarnings} from '../RecordingWarnings.tsx'
 import type {Report} from '../types.ts'
 import {FileDetails} from './FileDetails.tsx'
 import {Actions, Findings, Summary} from './Findings.tsx'
@@ -194,6 +195,7 @@ export function App({report}: {report: Report}) {
   return (
     <main {...stylex.props(styles.main)}>
       <Summary report={report} onShowUnloaded={() => setUnloaded(true)} />
+      <RecordingWarnings warnings={report.recordingWarnings} />
       <Findings
         report={report}
         onSearch={(query) => {

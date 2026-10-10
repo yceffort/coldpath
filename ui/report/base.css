@@ -1,6 +1,7 @@
 /* Theme tokens, a reset, and element defaults. Component styles live with their components (StyleX). */
 :root {
   color-scheme: light;
+  --warning: var(--unobserved);
   --bg: #f5f7fa;
   --panel: #fff;
   --border: #dce2e9;
