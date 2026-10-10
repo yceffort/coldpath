@@ -191,6 +191,44 @@ fn missing_earlier_measurements_never_become_deferral_or_removal_evidence() {
     assert!(report.recommendations.is_empty());
 }
 
+#[test]
+fn a_copy_in_a_bundle_the_initial_scenario_did_not_load_does_not_require_measuring() {
+    let f = Fixture::new();
+    f.write("app.js", "abcd");
+    f.map(&["src/lazy.js"]);
+    // Another route's chunk with a copy of the same module, never loaded in these scenarios.
+    f.write("other.js", "wxyz");
+    f.write(
+        "other.js.map",
+        &json!({"version":3,"sources":["src/lazy.js"],"names":[],"mappings":"AAAA"}).to_string(),
+    );
+    let options = AnalyzeOptions {
+        initial_scenario: Some("initial".into()),
+        ..Default::default()
+    };
+    let report = analyze_with_options(
+        &f.0,
+        &[
+            f.coverage(
+                "initial",
+                "abcd",
+                json!([{"startOffset":0,"endOffset":4,"count":0}]),
+            ),
+            f.coverage(
+                "later",
+                "abcd",
+                json!([{"startOffset":0,"endOffset":2,"count":1}]),
+            ),
+        ],
+        &options,
+    )
+    .unwrap();
+    let candidate = &report.scenario_reports[1].interaction_candidates[0];
+    assert_eq!(candidate.interaction_only_bytes, 2);
+    assert_eq!(candidate.initial_unmeasured_observed_bytes, 0);
+    assert_eq!(report.recommendations[0].kind, "inspect-imports");
+}
+
 fn evidence_graph() -> Value {
     json!({"schemaVersion":1,"bundler":"webpack","modules":[
         {"id":"entry","source":"src/main.js","entry":true},{"id":"middle","source":"src/middle.js"},

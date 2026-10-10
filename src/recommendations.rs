@@ -70,8 +70,10 @@ pub fn build(report: &Report) -> Vec<Recommendation> {
             let top_level_only =
                 initial_observed.map(|_| execution.is_some_and(|e| e.function_bytes == 0));
             let top_level_effect = execution.is_some_and(|e| has_top_level_effect(&e.top_level));
+            // Copies of the source in bundles the initial scenario did not load, such as another
+            // route's chunk, say nothing about the bytes that ran here.
             let (kind, explanation) = if candidate.initial_unmeasured_observed_bytes > 0
-                || initial_counts.is_none_or(|c| c.unmeasured_bytes > 0)
+                || initial_counts.is_none()
             {
                 (
                     "measure-initial",
