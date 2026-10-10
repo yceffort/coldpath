@@ -41,6 +41,8 @@ export interface GraphEdge {
 export interface Graph {
   schemaVersion: 1
   bundler: string
+  // The directory module sources are relative to, relative to the graph file's directory.
+  root?: string
   modules: GraphModule[]
   edges: GraphEdge[]
   warnings: string[]
@@ -48,6 +50,8 @@ export interface Graph {
 
 export const sha256 = (source: string | Buffer) => createHash('sha256').update(source).digest('hex')
 export const slash = (path: string) => path.replaceAll('\\', '/')
+// The `root` field of a graph written to `graphFile`.
+export const graphRoot = (root: string, graphFile: string) => slash(relative(dirname(resolve(graphFile)), resolve(root))) || '.'
 export const sourcePath = (path: string, root: string) =>
   path.startsWith('[project]/') ? path.slice(10) : isAbsolute(path) ? slash(relative(root, path)) : path.replace(/^\.\//, '')
 
@@ -180,6 +184,9 @@ export async function enrichLocations(graph: Graph, root: string) {
   const cache = new Map<string, {sites: ImportSite[]; hash: string}>()
   const result: GraphEdge[] = []
   let unclassified = 0
+  // Importers whose source file exists under root, and those missing from it.
+  let found = 0
+  const missing: string[] = []
   for (const [from, edges] of byFrom) {
     const mod = modules.get(from)
     let sites: ImportSite[] = []
@@ -194,9 +201,11 @@ export async function enrichLocations(graph: Graph, root: string) {
         }
         sites = parsed.sites
         mod.sourceSha256 = parsed.hash
+        found++
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'EISDIR')
-          graph.warnings.push(`No parsed import locations for ${mod.source}: ${(error as Error).message}`)
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'ENOENT') missing.push(mod.source)
+        else if (code !== 'EISDIR') graph.warnings.push(`No parsed import locations for ${mod.source}: ${(error as Error).message}`)
       }
     }
     const packages = new Map<string, string | null>()
@@ -240,6 +249,11 @@ export async function enrichLocations(graph: Graph, root: string) {
     }
   }
   graph.edges = result
+  // Virtual modules have no file, but when no importer has one the root is wrong.
+  if (missing.length && !found)
+    throw new Error(
+      `none of the ${missing.length} importing modules exists under ${root} (such as ${missing[0]}); pass the bundler's root, the directory its module paths are relative to`,
+    )
   if (unclassified)
     graph.warnings.push(
       `${unclassified} synchronous Turbopack edges come from files that also call require() and match neither an import nor a require; they are marked unknown.`,

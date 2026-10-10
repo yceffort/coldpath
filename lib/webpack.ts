@@ -1,7 +1,7 @@
 import {mkdir, writeFile} from 'node:fs/promises'
 import {dirname, resolve} from 'node:path'
 import type {Compiler} from 'webpack'
-import {enrichLocations, webpackGraph} from './graph.ts'
+import {enrichLocations, graphRoot, webpackGraph} from './graph.ts'
 
 // Writes the graph after the build, next to the emitted assets.
 export default class ColdpathGraphPlugin {
@@ -35,6 +35,7 @@ export default class ColdpathGraphPlugin {
       })
       const graph = await enrichLocations(webpackGraph(data, root), root)
       const out = resolve(compiler.outputPath, this.fileName)
+      graph.root = graphRoot(root, out)
       await mkdir(dirname(out), {recursive: true})
       await writeFile(out, JSON.stringify(graph) + '\n')
     })

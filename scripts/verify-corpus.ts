@@ -48,7 +48,12 @@ const save = async (filename: string, value: unknown) => {
 async function finish(name: string, dir: string, entry: string | null, graph?: Parameters<typeof enrichLocations>[0], graphRoot = project) {
   const graphFile = join(work, name + '.graph.json')
   if (graph) await save(graphFile, await enrichLocations(graph, graphRoot))
-  else await copyFile(join(dir, 'coldpath.graph.json'), graphFile)
+  else {
+    // Plugins record the root relative to the graph they emit.
+    const emitted = join(dir, 'coldpath.graph.json')
+    assert.equal(resolve(dir, JSON.parse(await readFile(emitted, 'utf8')).root), graphRoot, `${name}: recorded graph root`)
+    await copyFile(emitted, graphFile)
+  }
   if (entry)
     await writeFile(join(dir, 'index.html'), `<!doctype html><meta charset="utf-8"><script type="module" src="/${entry}"></script>`)
   artifacts.push({name, dir, graphFile, graphRoot})

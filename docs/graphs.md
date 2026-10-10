@@ -9,7 +9,7 @@ coldpath --dir dist --graph artifacts/graph.json --graph-root . \
   --json artifacts/actions.json --markdown artifacts/actions.md
 ```
 
-`--graph-root` is the bundler's project/working directory, defaulting to CWD. It is independent of the analysis root. Export and analyze from the same source revision and build. `--why src/chart.js` prints the chosen chain and available one-based locations. It takes a graph or report source as printed, or trailing path segments that match exactly one graph source, so `node_modules/chart.js/dist/chart.js` also finds a copy in a pnpm store such as `../../node_modules/.pnpm/chart.js@4.4.0/node_modules/chart.js/dist/chart.js`. When several sources or none match, the error lists the candidates. The treemap links the same evidence to source tiles and review suggestions.
+`--graph-root` is the directory the graph's source paths are relative to: the bundler's project or working directory. It is independent of the analysis root. `coldpath graph` and the plugins record it in the graph as `root`, relative to the graph file's directory, and the analyzer uses that when `--graph-root` is omitted; graphs without it default to CWD. After moving a graph to another directory, pass `--graph-root`, because the recorded path is relative. Export and analyze from the same source revision and build. `--why src/chart.js` prints the chosen chain and available one-based locations. It takes a graph or report source as printed, or trailing path segments that match exactly one graph source, so `node_modules/chart.js/dist/chart.js` also finds a copy in a pnpm store such as `../../node_modules/.pnpm/chart.js@4.4.0/node_modules/chart.js/dist/chart.js`. When several sources or none match, the error lists the candidates. The treemap links the same evidence to source tiles and review suggestions.
 
 ## esbuild
 
@@ -71,11 +71,10 @@ export default {
 }
 ```
 
-`next build` writes `.next/coldpath.graph.json`, and the next build replaces it, so no separate export step is needed. The graph root is webpack's `context`, the Next project directory, even inside a monorepo:
+`next build` writes `.next/coldpath.graph.json`, and the next build replaces it, so no separate export step is needed. The graph root is webpack's `context`, the Next project directory, even inside a monorepo. The graph records it, so `--graph-root` is not needed:
 
 ```sh
-coldpath --dir .next/static --graph .next/coldpath.graph.json \
-  --graph-root /path/to/next-app --treemap artifacts/next.html
+coldpath --dir .next/static --graph .next/coldpath.graph.json --treemap artifacts/next.html
 ```
 
 Checked with Next.js 16.3.8 and `next build --webpack`.
@@ -108,13 +107,23 @@ coldpath graph \
   --format turbopack --input .next/diagnostics/analyze \
   --root /path/to/turbopack-root --out artifacts/graph.json
 pnpm exec next build
-coldpath --dir .next/static --graph artifacts/graph.json \
-  --graph-root /path/to/turbopack-root --treemap artifacts/next.html
+coldpath --dir .next/static --graph artifacts/graph.json --treemap artifacts/next.html
 ```
 
 Export the graph **before** running `next build`, which clears the analyzer output under `.next`. Keep the exported JSON outside `.next`. You can also pass a saved `modules.data` file directly to `--input`.
 
-Use `turbopack.root`, which can be the workspace root rather than the Next project directory. The adapter reads the native `data/modules.data` JSON header and binary adjacency lists; it does not invent a webpack-shaped graph. Modules under `[next]/entry/` are entries, and so is every module that no other module imports, such as the Pages Router bootstrap `next/dist/client/next-turbopack.js`; a warning names the latter. Synchronous, asynchronous, and traced dependencies remain distinct. The synchronous list holds static imports and `require()` calls alike, so the adapter parses the importing file: an edge matched to a `require()` call becomes `require`, an unmatched edge from a file that also calls `require()` becomes `unknown` (counted in a warning), and other synchronous edges stay `static`, including those from virtual or unparsable importers. A package specifier matches when Node's `require` resolution from the importing file reaches the edge's target, or when the target is a file that the package's `exports` entry for that subpath names under any condition; a target the bundler chose through another field, such as `browser`, stays unmatched. By default only client module variants are exported; `--environment server` or `all` selects other variants. Source paths under `[project]/` bind to `turbopack:///` report identities. Runtime/virtual modules with no matching original source retain unknown locations.
+Pass `turbopack.root` as `--root`; the graph records it for the analyzer. Next's analyzer uses `turbopack.root`, else `outputFileTracingRoot`, else the project directory, so in a monorepo it is usually the workspace root rather than the Next project directory. `coldpath graph` fails when none of the importing modules exists under `--root`. The adapter reads the native `data/modules.data` JSON header and binary adjacency lists; it does not invent a webpack-shaped graph. Modules under `[next]/entry/` are entries, and so is every module that no other module imports, such as the Pages Router bootstrap `next/dist/client/next-turbopack.js`; a warning names the latter. Synchronous, asynchronous, and traced dependencies remain distinct. The synchronous list holds static imports and `require()` calls alike, so the adapter parses the importing file: an edge matched to a `require()` call becomes `require`, an unmatched edge from a file that also calls `require()` becomes `unknown` (counted in a warning), and other synchronous edges stay `static`, including those from virtual or unparsable importers. A package specifier matches when Node's `require` resolution from the importing file reaches the edge's target, or when the target is a file that the package's `exports` entry for that subpath names under any condition; a target the bundler chose through another field, such as `browser`, stays unmatched. By default only client module variants are exported; `--environment server` or `all` selects other variants. Source paths under `[project]/` bind to `turbopack:///` report identities. Runtime/virtual modules with no matching original source retain unknown locations.
+
+### Which root
+
+The two Next.js builds name sources from different directories, so their graph roots differ in a monorepo:
+
+| Build | Graph root |
+| --- | --- |
+| `next build --webpack` with the plugin | webpack's `context`, the Next project directory |
+| Turbopack, exported with `coldpath graph --format turbopack` | `turbopack.root`, else `outputFileTracingRoot`, else the Next project directory |
+
+Both graphs record their root. When a root is wrong anyway, for example after a graph was moved, the analyzer looks for one that fits in the analysis root, the current directory, and their parents, and names it in the error or warning.
 
 This file format and [Next's analyzer](https://nextjs.org/docs/pages/guides/package-bundling) are experimental. Unsupported layouts and invalid binary offsets fail. The analyzer and build are separate runs; keep settings, revision, and generated files consistent. A graph is dependency evidence, not a recording of browser download time. The corpus checks this exact version, not every past/future Turbopack version.
 
@@ -124,6 +133,7 @@ This file format and [Next's analyzer](https://nextjs.org/docs/pages/guides/pack
 {
   "schemaVersion": 1,
   "bundler": "webpack",
+  "root": "..",
   "modules": [
     {"id": "entry", "source": "src/dashboard.tsx", "entry": true},
     {"id": "chart", "source": "node_modules/chart.js/dist/chart.js"}
@@ -138,10 +148,10 @@ This file format and [Next's analyzer](https://nextjs.org/docs/pages/guides/pack
 }
 ```
 
-Module IDs must be unique; every edge must reference existing IDs; at least one module must be an entry. Optional `emittedBytes` is bundler evidence, not source-map attribution. Optional `sourceSha256` binds locations to a source snapshot. Edges use `static`, `dynamic`, `require`, or `unknown`. A `require` edge located in parsed source (`parsed-source` or `plugin-input`) carries `topLevel`: `true` when the parser can show that the call runs whenever the importing module evaluates, and `false` otherwise, for example inside a function, class body, branch, loop, catch clause, logical operand, or default value. The branches of an `if` or conditional expression whose test compares `process.env.NODE_ENV` with a string count as running, because webpack, esbuild, Vite, and Next.js Turbopack production builds fold that test and keep only the taken branch's imports in the graph. Edges with no parsed source, such as those from virtual importers or recovered `e.r` calls, omit it. Locations are one-based and omitted when unavailable.
+Module IDs must be unique; every edge must reference existing IDs; at least one module must be an entry. Optional `root` is the directory module sources are relative to, relative to the graph file's directory. Optional `emittedBytes` is bundler evidence, not source-map attribution. Optional `sourceSha256` binds locations to a source snapshot. Edges use `static`, `dynamic`, `require`, or `unknown`. A `require` edge located in parsed source (`parsed-source` or `plugin-input`) carries `topLevel`: `true` when the parser can show that the call runs whenever the importing module evaluates, and `false` otherwise, for example inside a function, class body, branch, loop, catch clause, logical operand, or default value. The branches of an `if` or conditional expression whose test compares `process.env.NODE_ENV` with a string count as running, because webpack, esbuild, Vite, and Next.js Turbopack production builds fold that test and keep only the taken branch's imports in the graph. Edges with no parsed source, such as those from virtual importers or recovered `e.r` calls, omit it. Locations are one-based and omitted when unavailable.
 
 The analyzer prefers a synchronous chain (static imports and `require` edges with `topLevel: true`) even when a shorter dynamic path exists, handles cycles, and then uses a shortest available chain. It does not claim the displayed path is unique. `defer-review` and `split-review` require every edge in that chain to be synchronous; other `require` edges and unknown edges do not establish a safe deferral boundary. Unmatched source identities remain unmatched rather than using ambiguous filename suffix matching.
 
-When snapshot hashes and matching `sourcesContent` exist, the analyzer compares them. On a mismatch it hashes the source file under `--graph-root`: if that file matches the snapshot, `sourcesContent` was transformed by a loader such as Babel, so the analysis continues with a warning and those locations stay unverified; otherwise the graph is rejected as stale. Verified edge locations append `+sources-content-sha256` to their provenance. The CLI temporarily retains source content for this check even without `--details`; compact exports still omit code. Missing content/hashes remain unverified, and graph topology itself is not capture-hash verified. Original file parsing cannot establish whether a stale graph describes the current build.
+When snapshot hashes and matching `sourcesContent` exist, the analyzer compares them. On a mismatch it hashes the source file under `--graph-root`: if that file matches the snapshot, `sourcesContent` was transformed by a loader such as Babel, so the analysis continues with a warning and those locations stay unverified; otherwise the graph is rejected as stale. When the file does not exist under the graph root, the root may be wrong instead, and the error names a directory (the analysis root, the current directory, or one of their parents) that holds the file with the snapshot's hash. A changed import changes its importer's file, so a graph exported from an older revision is rejected when that importer has a snapshot and matching `sourcesContent`; changes outside the sources, such as bundler configuration, are not detected. Verified edge locations append `+sources-content-sha256` to their provenance. The CLI temporarily retains source content for this check even without `--details`; compact exports still omit code. Missing content/hashes remain unverified, and graph topology itself is not capture-hash verified. Original file parsing cannot establish whether a stale graph describes the current build.
 
 See the [accuracy corpus](accuracy-corpus.md) for pinned versions, real build checks, and measured source-map limitations.

@@ -1027,6 +1027,23 @@ fn feature_fixture() -> Fixture {
     f
 }
 
+fn feature_graph(root: &str) -> String {
+    json!({"schemaVersion":1,"bundler":"rollup","root":root,"modules":[
+        {"id":"login","source":"src/features/auth/login.js","entry":true},
+        {"id":"form","source":"src/features/auth/form.js"},
+        {"id":"cart","source":"src/features/cart/cart.js"},
+        {"id":"a","source":"node_modules/a/index.js"},
+        {"id":"b","source":"node_modules/b/index.js"},
+        {"id":"virtual","source":"[next]/entry/page.js","entry":true}],"edges":[
+        {"from":"login","to":"form","kind":"static"},
+        {"from":"login","to":"a","kind":"static","location":{"line":3,"column":1}},
+        {"from":"cart","to":"a","kind":"dynamic","location":{"line":1,"column":8}},
+        {"from":"a","to":"b","kind":"static"},
+        {"from":"virtual","to":"b","kind":"static"},
+        {"from":"login","to":"cart","kind":"dynamic"}]})
+    .to_string()
+}
+
 #[test]
 fn group_by_sums_sources_under_the_shortest_matching_path() {
     let f = feature_fixture();
@@ -1077,4 +1094,88 @@ fn group_by_sums_sources_under_the_shortest_matching_path() {
         String::from_utf8_lossy(&run(&["--group-by", "src/["]).stderr)
             .contains("invalid --group-by glob")
     );
+}
+
+#[test]
+fn a_wrong_graph_root_is_reported_instead_of_a_stale_graph() {
+    let f = Fixture::new();
+    f.write("app.js", "abcd");
+    f.write("app.js.map", &json!({"version":3,"sources":["webpack://app/./src/a.js"],"sourcesContent":["TRANSFORMED"],"names":[],"mappings":"AAAA"}).to_string());
+    fs::create_dir_all(f.0.join("src")).unwrap();
+    fs::create_dir_all(f.0.join("nested")).unwrap();
+    f.write("src/a.js", "ORIGINAL");
+    f.write(
+        "graph.json",
+        &json!({"schemaVersion":1,"bundler":"webpack","modules":[
+        {"id":"a","source":"src/a.js","entry":true,"sourceSha256":sha256(b"ORIGINAL")}],"edges":[]})
+        .to_string(),
+    );
+    let run = |root: &str| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args([
+                "--dir",
+                ".",
+                "--graph",
+                "graph.json",
+                "--graph-root",
+                root,
+                "--json",
+                "-",
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = run("nested");
+    assert_eq!(output.status.code(), Some(1));
+    let root = fs::canonicalize(&f.0).unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "so the graph root looks wrong: pass --graph-root {}.",
+            root.display()
+        )),
+        "{stderr}"
+    );
+    assert!(run(".").status.success());
+}
+
+#[test]
+fn a_recorded_graph_root_replaces_the_current_directory() {
+    let f = feature_fixture();
+    fs::create_dir_all(f.0.join("out")).unwrap();
+    fs::create_dir_all(f.0.join("elsewhere")).unwrap();
+    // Run elsewhere, so the current directory is not the graph root.
+    let run = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(f.0.join("elsewhere"))
+            .args(["--dir", "..", "--coverage", "../initial"])
+            .args(["--graph", "../out/graph.json", "--json", "-"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    f.write("out/graph.json", &feature_graph(".."));
+    assert_eq!(run()["importPaths"].as_array().unwrap().len(), 5);
+    // A recorded root that does not exist falls back to the current directory, and the
+    // warning names the directory where the graph's sources match.
+    f.write("out/graph.json", &feature_graph("../missing"));
+    let report = run();
+    let warnings = report["warnings"].to_string();
+    let root = fs::canonicalize(&f.0).unwrap();
+    assert!(warnings.contains("recorded root"), "{warnings}");
+    assert!(
+        warnings.contains(&format!(
+            "but 5 match under {}: pass --graph-root {}",
+            root.display(),
+            root.display()
+        )),
+        "{warnings}"
+    );
+    assert!(report["importPaths"].as_array().unwrap().is_empty());
 }

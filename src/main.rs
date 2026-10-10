@@ -565,10 +565,22 @@ fn main() -> Result<()> {
         )?;
         report.import_paths = Some(paths);
     }
-    if let Some(path) = &args.graph {
+    if let Some(path) = args.graph.clone() {
+        let data = fs::read(&path)?;
+        // Without --graph-root, the root the graph was exported with; evidence export records the one used.
+        if args.graph_root.is_none() {
+            match coldpath::graph::recorded_root(&data, &path) {
+                Some(root) if root.is_dir() => args.graph_root = Some(root),
+                Some(root) => report.warnings.push(format!(
+                    "The graph's recorded root {} does not exist, so the current directory is the graph root; pass --graph-root.",
+                    root.display()
+                )),
+                None => {}
+            }
+        }
         coldpath::graph::attach(
             &mut report,
-            &fs::read(path)?,
+            &data,
             &dir,
             &args.graph_root.clone().unwrap_or(std::env::current_dir()?),
         )?;

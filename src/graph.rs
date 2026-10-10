@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -64,6 +64,61 @@ struct Graph {
     edges: Vec<ImportStep>,
     #[serde(default)]
     warnings: Vec<String>,
+}
+
+const ROOT_HINT: &str = "the directory the graph's source paths are relative to: webpack's context, turbopack.root, or coldpath graph --root";
+
+/// The root recorded in a graph, resolved against the graph file's directory. An invalid
+/// graph has none here; [`attach`] reports it.
+pub fn recorded_root(data: &[u8], graph_file: &Path) -> Option<PathBuf> {
+    #[derive(Deserialize)]
+    struct Recorded {
+        root: Option<String>,
+    }
+    let root = serde_json::from_slice::<Recorded>(data).ok()?.root?;
+    Some(graph_file.parent().unwrap_or(Path::new("")).join(root))
+}
+
+/// Directories a misplaced graph root may have meant: the analysis root, the current
+/// directory, and their ancestors, nearest first.
+fn root_candidates(root: &Path) -> Vec<PathBuf> {
+    let cwd = std::env::current_dir().and_then(std::fs::canonicalize).ok();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for start in [Some(root.to_path_buf()), cwd].into_iter().flatten() {
+        for directory in start.ancestors() {
+            if !candidates.iter().any(|c| c == directory) {
+                candidates.push(directory.into());
+            }
+        }
+    }
+    candidates
+}
+
+/// Report source names by the physical path they identify.
+fn source_aliases(
+    report: &Report,
+    resolver: &SourcePaths,
+    report_resolver: &SourcePaths,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut aliases: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for row in &report.sources {
+        let physical = if let Some(rest) = row.source.strip_prefix("webpack://") {
+            rest.split_once('/')
+                .map(|(_, path)| resolver.resolve(path.trim_start_matches('/')))
+        } else if let Some(rest) = row.source.strip_prefix("turbopack:///") {
+            rest.strip_prefix("[project]/")
+                .map(|path| resolver.resolve(path))
+        } else {
+            Some(report_resolver.resolve(&row.source))
+        };
+        if let Some(physical) = physical {
+            aliases
+                .entry(physical)
+                .or_default()
+                .insert(row.source.clone());
+        }
+    }
+    aliases
 }
 
 pub fn attach(
@@ -146,24 +201,7 @@ pub fn attach(
         root: &root,
         directory: &root,
     };
-    let mut aliases: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for row in &report.sources {
-        let physical = if let Some(rest) = row.source.strip_prefix("webpack://") {
-            rest.split_once('/')
-                .map(|(_, path)| resolver.resolve(path.trim_start_matches('/')))
-        } else if let Some(rest) = row.source.strip_prefix("turbopack:///") {
-            rest.strip_prefix("[project]/")
-                .map(|path| resolver.resolve(path))
-        } else {
-            Some(report_resolver.resolve(&row.source))
-        };
-        if let Some(physical) = physical {
-            aliases
-                .entry(physical)
-                .or_default()
-                .insert(row.source.clone());
-        }
-    }
+    let aliases = source_aliases(report, &resolver, &report_resolver);
     let contents = report
         .bundles
         .iter()
@@ -198,13 +236,38 @@ pub fn attach(
         }
         // Loaders such as Babel replace sourcesContent with their own output. The graph
         // still describes these sources when it matches the file on disk; its locations
-        // stay unverified against the maps.
+        // stay unverified against the maps. A file missing from the graph root points at
+        // the root rather than the graph.
         let file = directory.join(&module.source);
-        ensure!(
-            std::fs::read(&file).is_ok_and(|bytes| crate::sha256(&bytes) == *expected),
-            "graph source snapshot differs from sourcesContent for {}; regenerate the graph from this build's sources",
-            module.source
-        );
+        match std::fs::read(&file) {
+            Ok(bytes) => ensure!(
+                crate::sha256(&bytes) == *expected,
+                "graph source snapshot differs from sourcesContent for {}; regenerate the graph from this build's sources",
+                module.source
+            ),
+            Err(_) => {
+                let candidate = root_candidates(&root).into_iter().find(|candidate| {
+                    *candidate != directory
+                        && std::fs::read(candidate.join(&module.source))
+                            .is_ok_and(|bytes| crate::sha256(&bytes) == *expected)
+                });
+                anyhow::bail!(
+                    "graph source snapshot differs from sourcesContent for {}, and the file is not under the graph root {}. {}",
+                    module.source,
+                    directory.display(),
+                    match candidate {
+                        Some(candidate) => format!(
+                            "{} holds it with the graph's snapshot, so the graph root looks wrong: pass --graph-root {}.",
+                            candidate.display(),
+                            candidate.display()
+                        ),
+                        None => format!(
+                            "Check --graph-root ({ROOT_HINT}) or regenerate the graph from this build's sources."
+                        ),
+                    }
+                );
+            }
+        }
         report.read_files.push(file);
         on_disk_only += 1;
     }
@@ -280,7 +343,36 @@ pub fn attach(
     };
     report.warnings.push(format!("Graph source snapshots: {} matched sourcesContent;{on_disk_note} {unchecked} could not be checked. Graph topology itself is not capture-hash verified; retain the graph from the same build.", verified.len()));
     if paths.is_empty() {
-        report.warnings.push("No graph modules matched source-map identities; check --graph-root and the selected build.".into());
+        // Only identities resolved through the graph root can change with it.
+        let candidate = root_candidates(&root)
+            .into_iter()
+            .filter(|candidate| *candidate != directory)
+            .map(|candidate| {
+                let resolver = SourcePaths {
+                    root: &root,
+                    directory: &candidate,
+                };
+                let aliases = source_aliases(report, &resolver, &report_resolver);
+                let matched = graph
+                    .modules
+                    .iter()
+                    .filter(|m| aliases.contains_key(&resolver.resolve(&m.source)))
+                    .count();
+                (matched, candidate)
+            })
+            .filter(|(matched, _)| *matched > 0)
+            .max_by_key(|(matched, _)| *matched);
+        report.warnings.push(match candidate {
+            Some((matched, candidate)) => format!(
+                "No graph modules matched source-map identities under the graph root {}, but {matched} match under {}: pass --graph-root {}.",
+                directory.display(),
+                candidate.display(),
+                candidate.display()
+            ),
+            None => format!(
+                "No graph modules matched source-map identities; check --graph-root ({ROOT_HINT}) and the selected build."
+            ),
+        });
     }
     report.import_paths = Some(paths);
     report.recommendations = crate::recommendations::build(report);
