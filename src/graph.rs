@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImportKind {
     Static,
@@ -16,7 +16,7 @@ pub enum ImportKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct Location {
     pub line: usize,
     pub column: usize,
@@ -42,6 +42,78 @@ impl ImportStep {
         self.kind == ImportKind::Static
             || (self.kind == ImportKind::Require && self.top_level == Some(true))
     }
+}
+
+/// An import from first-party code into a dependency, the edge that makes a package load.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Importer {
+    /// The first-party module, as the graph names it.
+    pub source: String,
+    pub kind: ImportKind,
+    pub location: Option<Location>,
+    /// The package this import enters, when the package is reached through it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+}
+
+/// For each package: the first-party modules with an edge into it, or into a dependency
+/// from which it is reachable through dependencies only. Virtual modules (`[next]/...`,
+/// `\0...`) are not first-party code.
+fn importers(graph: &Graph) -> BTreeMap<String, Vec<Importer>> {
+    let packages = graph
+        .modules
+        .iter()
+        .map(|m| {
+            let package = crate::attribution::package(&m.source);
+            let first_party = package == crate::attribution::APPLICATION
+                && !m.source.starts_with('[')
+                && !m.source.contains('\0');
+            (m.id.as_str(), (package, first_party, &m.source))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let dependency = |id: &str| packages[id].0 != crate::attribution::APPLICATION;
+    let mut outgoing: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for edge in &graph.edges {
+        if dependency(&edge.from) && dependency(&edge.to) {
+            outgoing.entry(&edge.from).or_default().push(&edge.to);
+        }
+    }
+    let mut reachable: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut result: BTreeMap<String, BTreeSet<Importer>> = BTreeMap::new();
+    for edge in &graph.edges {
+        if !packages[edge.from.as_str()].1 || !dependency(&edge.to) {
+            continue;
+        }
+        let entered = packages[edge.to.as_str()].0.as_str();
+        let reached = reachable.entry(&edge.to).or_insert_with(|| {
+            let mut seen = BTreeSet::from([edge.to.as_str()]);
+            let mut queue = VecDeque::from([edge.to.as_str()]);
+            while let Some(id) = queue.pop_front() {
+                for next in outgoing.get(id).into_iter().flatten() {
+                    if seen.insert(next) {
+                        queue.push_back(next);
+                    }
+                }
+            }
+            seen.into_iter().map(|id| packages[id].0.as_str()).collect()
+        });
+        for package in reached.iter() {
+            result
+                .entry((*package).into())
+                .or_default()
+                .insert(Importer {
+                    source: packages[edge.from.as_str()].2.clone(),
+                    kind: edge.kind,
+                    location: edge.location.clone(),
+                    via: (*package != entered).then(|| entered.into()),
+                });
+        }
+    }
+    result
+        .into_iter()
+        .map(|(package, importers)| (package, importers.into_iter().collect()))
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -333,6 +405,14 @@ pub fn attach(
             })
             .then(a.edges.len().cmp(&b.edges.len()))
     });
+    let mut importers = importers(&graph);
+    for row in &mut report.packages {
+        if row.package != crate::attribution::APPLICATION
+            && row.package != crate::attribution::UNMAPPED
+        {
+            row.importers = Some(importers.remove(&row.package).unwrap_or_default());
+        }
+    }
     report.warnings.extend(graph.warnings);
     let on_disk_note = if on_disk_only > 0 {
         format!(

@@ -144,14 +144,33 @@ pub fn markdown(report: &Report) -> String {
     if let Some(c) = &report.compression {
         out.push_str(&format!("\nSum of independently compressed bundles: gzip (level 6) **{} B**, Brotli (quality 5, lgwin 22) **{} B**. These are not estimates of removable bytes or actual server encoding.\n", c.gzip_bytes, c.brotli_bytes));
     }
-    out.push_str(&format!("\n{} bundles excluded by CLI/config filters; totals and budgets use selected bundles only.\n\n| Package | Generated B | Unobserved B | Unmeasured B |\n| --- | ---: | ---: | ---: |\n", report.excluded_bundles.len()));
+    let importers = report.packages.iter().any(|row| row.importers.is_some());
+    out.push_str(&format!(
+        "\n{} bundles excluded by CLI/config filters; totals and budgets use selected bundles only.\n{}\n| Package | Generated B | Unobserved B | Unmeasured B |{}\n| --- | ---: | ---: | ---: |{}\n",
+        report.excluded_bundles.len(),
+        if importers {
+            "\nFirst-party importers are application modules whose graph imports reach the package, directly or through another dependency (via). Framework entries and other dependencies can load a package as well; the JSON report lists every importer with its import kind and location.\n"
+        } else {
+            ""
+        },
+        if importers { " First-party importers |" } else { "" },
+        if importers { " --- |" } else { "" }
+    ));
     for row in report.packages.iter().take(20) {
         out.push_str(&format!(
-            "| {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} |{}\n",
             escape_markdown(&row.package),
             row.counts.bytes,
             row.counts.unobserved_bytes,
-            row.counts.unmeasured_bytes
+            row.counts.unmeasured_bytes,
+            if importers {
+                format!(
+                    " {} |",
+                    escape_markdown(&importer_summary(row.importers.as_deref()))
+                )
+            } else {
+                String::new()
+            }
         ));
     }
     if !report.groups.is_empty() {
@@ -285,6 +304,34 @@ pub fn markdown(report: &Report) -> String {
         ));
     }
     out
+}
+
+/// Up to three first-party modules that import a package, direct importers first.
+fn importer_summary(importers: Option<&[crate::graph::Importer]>) -> String {
+    let Some(importers) = importers else {
+        return "—".into();
+    };
+    let mut names = Vec::new();
+    for direct in [true, false] {
+        for importer in importers.iter().filter(|i| i.via.is_none() == direct) {
+            let name = match &importer.via {
+                Some(via) => format!("{} via {via}", importer.source),
+                None => importer.source.clone(),
+            };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    if names.is_empty() {
+        return "no first-party import".into();
+    }
+    let more = names.len().saturating_sub(3);
+    let mut text = names.into_iter().take(3).collect::<Vec<_>>().join(", ");
+    if more > 0 {
+        text += &format!(", and {more} more");
+    }
+    text
 }
 
 /// Rows per action kind in the Markdown review tables.

@@ -89,6 +89,9 @@ pub struct PackageRow {
     pub package: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_compression: Option<ci::CompressedSizes>,
+    /// First-party imports that load this dependency, from `--graph`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub importers: Option<Vec<graph::Importer>>,
     #[serde(flatten)]
     pub counts: Counts,
 }
@@ -1117,6 +1120,7 @@ fn aggregate_sources(source_counts: BTreeMap<String, Counts>) -> (Vec<SourceRow>
             package,
             counts,
             estimated_compression: None,
+            importers: None,
         })
         .collect();
     packages.sort_by(|a, b| {
