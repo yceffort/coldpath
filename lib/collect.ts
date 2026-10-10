@@ -35,6 +35,8 @@ export interface CaptureOptions {
   cpuSlowdown?: number
   storageState?: string
   extraHTTPHeaders?: Record<string, string>
+  // true, or regular expressions that a tolerated page error's message matches.
+  allowPageErrors?: boolean | string[]
   browserPath?: string
   browserChannel?: string
 }
@@ -88,6 +90,7 @@ export async function prepare(
     cpuSlowdown,
     storageState,
     extraHTTPHeaders,
+    allowPageErrors = false,
     browserPath,
     browserChannel,
   }: CaptureOptions,
@@ -134,6 +137,12 @@ export async function prepare(
       (typeof extraHTTPHeaders === 'object' && Object.values(extraHTTPHeaders).every((value) => typeof value === 'string')),
     'extraHTTPHeaders must map header names to strings',
   )
+  assert(
+    typeof allowPageErrors === 'boolean' || (Array.isArray(allowPageErrors) && allowPageErrors.every((p) => typeof p === 'string')),
+    'allowPageErrors must be true or a list of regular expressions',
+  )
+  const patterns = typeof allowPageErrors === 'boolean' ? (allowPageErrors ? [/(?:)/] : []) : allowPageErrors.map((p) => new RegExp(p))
+  const tolerated = (message: string) => patterns.some((pattern) => pattern.test(message))
   if (network) {
     for (const key of ['latencyMs', 'downloadKbps', 'uploadKbps'] as const) {
       assert(Number.isFinite(network[key]) && network[key] >= 0, `network.${key} must be a nonnegative number`)
@@ -182,6 +191,7 @@ export async function prepare(
     cpuSlowdown,
     storageState,
     extraHTTPHeaders,
+    tolerated,
     browserPath,
     browserChannel,
     launch,
@@ -237,6 +247,15 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   if (cpuSlowdown) await cdp.send('Emulation.setCPUThrottlingRate', {rate: cpuSlowdown})
   if (beforeNavigation) await beforeNavigation({page, context})
   return {context, page, cdp, errors, blocked, requests}
+}
+
+// Page errors that no allowPageErrors pattern tolerates fail the scenario.
+export function checkErrors(setup: Setup, errors: string[]) {
+  const failed = errors.filter((message) => !setup.tolerated(message))
+  assert(
+    !failed.length,
+    `page threw ${failed.length} runtime errors (allow expected ones with allowPageErrors or --allow-page-error):\n${failed.map((message) => `  ${message}`).join('\n')}`,
+  )
 }
 
 // Checks script text the browser had against the file under --dir.
@@ -367,7 +386,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
     await snapshot()
     await cdp.send('Profiler.stopPreciseCoverage')
     if (failures.length) throw failures[0]
-    assert.deepEqual(errors, [], 'page threw runtime errors')
+    checkErrors(setup, errors)
     assert(scripts.length > 0, 'no scripts matched --prefix or --cdn-prefix')
     scripts.sort((a, b) => a.path.localeCompare(b.path))
     const artifact = {
@@ -382,6 +401,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
       url: target.href,
       requests,
       blockedOrigins: [...blocked].sort(),
+      pageErrors: errors,
       excludedScripts: [...excluded].sort(),
       scripts,
     }

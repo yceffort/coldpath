@@ -7,7 +7,7 @@ import {cpus} from 'node:os'
 import {dirname, resolve} from 'node:path'
 import {promisify} from 'node:util'
 
-import {checkScript, environment, open, prepare, verifyScript} from './collect.ts'
+import {checkErrors, checkScript, environment, open, prepare, verifyScript} from './collect.ts'
 import type {CaptureOptions, Setup} from './collect.ts'
 
 // The fields of a CDP Profiler.Profile that are read.
@@ -57,6 +57,7 @@ interface Entry {
     }
   >
   blocked: Set<string>
+  pageErrors: Set<string>
   workers: number
   environment?: Awaited<ReturnType<typeof environment>>
 }
@@ -176,7 +177,7 @@ async function measure(entry: Entry) {
       profiles.action = (await cdp.send('Profiler.stop')).profile
     }
     assert.equal(documents, 1, 'coldpath profile does not support multi-document navigation flows; profile each page as its own scenario')
-    assert.deepEqual(errors, [], 'page threw runtime errors')
+    checkErrors(setup, errors)
 
     // A `//# sourceURL` comment replaces `url`; `embedderName` keeps the URL the script came from.
     const urls = new Map<string, string>()
@@ -205,7 +206,7 @@ async function measure(entry: Entry) {
     assert(scripts.size > 0, 'no scripts matched --prefix or --cdn-prefix')
     const windows = Object.fromEntries(Object.entries(profiles).map(([name, profile]) => [name, reduce(profile, scripts)]))
     entry.environment ??= await environment(browser, page, setup)
-    return {windows, scripts: [...scripts.values()], blocked, workers}
+    return {windows, scripts: [...scripts.values()], blocked, errors, workers}
   } finally {
     await browser.close()
   }
@@ -225,6 +226,7 @@ export async function profile(scenarios: (CaptureOptions & {profileOut?: string}
       windows: Object.fromEntries(names.map((name) => [name, {durationUs: [], samples: [], buckets: {}}])),
       scripts: new Map(),
       blocked: new Set(),
+      pageErrors: new Set(),
       workers: 0,
     })
   }
@@ -239,6 +241,7 @@ export async function profile(scenarios: (CaptureOptions & {profileOut?: string}
     for (const entry of entries) {
       const result = await measure(entry)
       for (const origin of result.blocked) entry.blocked.add(origin)
+      for (const message of result.errors) entry.pageErrors.add(message)
       entry.workers += result.workers
       for (const script of result.scripts) {
         const known = entry.scripts.get(script.path)
@@ -290,6 +293,8 @@ export async function profile(scenarios: (CaptureOptions & {profileOut?: string}
       },
       url: setup.target.href,
       blockedOrigins: [...entry.blocked].sort(),
+      // Distinct messages across runs.
+      pageErrors: [...entry.pageErrors],
       windows,
       scripts,
     }

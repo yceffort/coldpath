@@ -92,7 +92,7 @@ coldpath collect --scenarios coldpath.scenarios.json
 coldpath analyze --scenarios coldpath.scenarios.json --html artifacts/combined.html
 ```
 
-`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`), and `coldpath profile` writes `<out>/<name>.profile.json` from the same file ([CPU cost](cpu.md)). `analyze` adds `--dir`, one `--coverage` per scenario, `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, and the [environment options](#device-throttling-and-authenticated-state) can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
+`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`), and `coldpath profile` writes `<out>/<name>.profile.json` from the same file ([CPU cost](cpu.md)). `analyze` adds `--dir`, one `--coverage` per scenario, `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, the [environment options](#device-throttling-and-authenticated-state), and [`allowPageErrors`](#checking-the-page-state) can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
 
 ## Device, throttling, and authenticated state
 
@@ -140,6 +140,12 @@ Envelope scripts record the browser `url` they were matched from.
 
 A scenario that calls an API or loads other resources from another origin needs that origin in `--allow-origin` (repeatable; `allowOrigins` in a scenario file, at the top level or per scenario), such as `https://api.example.com`. Requests to it pass through and appear in the envelope's `requests`; scripts it serves are not attributed, so list a script origin under `--cdn-prefix` instead. `environment.allowedOrigins` records the allowed origins. The recording then depends on what that service returned at the time, so a different response can change which code runs.
 
+## Checking the page state
+
+A page error (an uncaught exception or an unhandled promise rejection) fails the scenario by default. `allowPageErrors: true` tolerates every page error; a list of regular expressions (`--allow-page-error REGEX`, repeatable) tolerates errors whose message matches one of them. Tolerated errors stay in the envelope's `pageErrors`, and other errors still fail the scenario with their messages.
+
+`profile` applies `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`.
+
 ## Unsupported: workers
 
 Web Worker, shared worker, and service worker coverage is not recorded, and worker scripts in `--dir` stay unmeasured. The collector cannot start precise coverage in a dedicated worker before the worker's top-level code runs: Playwright attaches to new workers itself and resumes them immediately, so by the time a second CDP session sees the worker, its top-level code has already run and V8 reports only some functions, without block detail. Holding the worker script request until coverage starts does not work either, because the worker target appears only after its script is fetched, and holding `importScripts` requests deadlocks the worker. A partial recording would report code that ran as unobserved, so the collector records nothing rather than wrong evidence. Service workers remain blocked.
@@ -148,7 +154,7 @@ Web Worker, shared worker, and service worker coverage is not recorded, and work
 
 The collector runs the actions module's optional `setup`, starts precise V8 coverage before navigation, waits for `networkidle`, waits another 1,000 ms by default, runs optional actions, and takes a final coverage snapshot (plus one before each unload). `--wait-ms 0` removes the extra observation window. Pages with persistent requests may never reach `networkidle`; use your own Playwright recording when a different readiness condition is required.
 
-Only the page's CDP target is captured. Workers, other tabs, and server-side execution are outside its scope. Service workers and cross-origin requests other than `--cdn-prefix` and `--allow-origin` origins are blocked, so an application that calls an external API needs its origin in [`--allow-origin`](#other-origins). Page runtime errors and unsuccessful navigation cause capture to fail. Precise coverage changes execution behavior, so capture durations are not performance measurements.
+Only the page's CDP target is captured. Workers, other tabs, and server-side execution are outside its scope. Service workers and cross-origin requests other than `--cdn-prefix` and `--allow-origin` origins are blocked, so an application that calls an external API needs its origin in [`--allow-origin`](#other-origins). Unsuccessful navigation fails the capture, and so do page runtime errors that [`allowPageErrors`](#checking-the-page-state) does not tolerate. Precise coverage changes execution behavior, so capture durations are not performance measurements.
 
 Matching `.js`, `.mjs`, and `.cjs` scripts are checked against the local build with SHA-256. The artifact records those hashes, local map hashes (or explicit map absence), V8 function ranges, and capture metadata. Inline and eval scripts without a matching file extension are excluded. A missing matching file, stale build, or path outside `--dir` is an error.
 
