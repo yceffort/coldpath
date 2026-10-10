@@ -257,6 +257,9 @@ pub struct Report {
     pub sources: Vec<SourceRow>,
     pub packages: Vec<PackageRow>,
     pub warnings: Vec<String>,
+    /// What the collector reported about the recorded page state: aborted origins and
+    /// tolerated page errors. The numbers describe that state.
+    pub recording_warnings: Vec<String>,
     pub excluded_bundles: Vec<String>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
@@ -369,7 +372,12 @@ pub fn analyze_with_options(
     options: &AnalyzeOptions,
 ) -> Result<Report> {
     let canonical_root = fs::canonicalize(dir)?;
-    let (mut coverage, mut scenarios, warnings) = input::load(coverage_files, dir, &options.input)?;
+    let input::Loaded {
+        index: mut coverage,
+        mut scenarios,
+        warnings,
+        recording_warnings,
+    } = input::load(coverage_files, dir, &options.input)?;
     let mut profiles = cpu::Profiles::load(&options.profiles)?;
     let mut seen = BTreeSet::new();
     scenarios.retain(|name| seen.insert(name.clone()));
@@ -445,6 +453,7 @@ pub fn analyze_with_options(
         sources: Vec::new(),
         packages: Vec::new(),
         warnings,
+        recording_warnings,
         excluded_bundles: Vec::new(),
         include: options.include.clone(),
         exclude: options.exclude.clone(),

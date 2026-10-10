@@ -232,11 +232,16 @@ pub fn filter(
     Ok((serde_json::to_vec(&value)?, removed))
 }
 
-pub fn load(
-    paths: &[PathBuf],
-    root: &Path,
-    options: &InputOptions,
-) -> Result<(Index, Vec<String>, Vec<String>)> {
+/// Coverage files read by [`load`].
+pub struct Loaded {
+    pub index: Index,
+    pub scenarios: Vec<String>,
+    pub warnings: Vec<String>,
+    /// What the collector reported about the page state behind each coldpath envelope.
+    pub recording_warnings: Vec<String>,
+}
+
+pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Loaded> {
     for prefix in &options.url_prefixes {
         ensure!(
             prefix.ends_with('/'),
@@ -246,6 +251,7 @@ pub fn load(
     let mut index: Index = BTreeMap::new();
     let mut scenarios = Vec::new();
     let mut warnings = Vec::new();
+    let mut recording = Vec::new();
     for path in paths {
         let value: serde_json::Value = serde_json::from_slice(
             &fs::read(path).with_context(|| format!("read coverage {}", path.display()))?,
@@ -263,6 +269,32 @@ pub fn load(
                 "coverage scenario cannot be empty"
             );
             scenarios.push(file.scenario.clone());
+            if !file.blocked_origins.is_empty() {
+                recording.push(format!(
+                    "{}: the collector aborted requests to {} because they are not --allow-origin or --cdn-prefix origins, so the recording shows the page without those responses",
+                    file.scenario,
+                    file.blocked_origins.join(", ")
+                ));
+            }
+            if !file.page_errors.is_empty() {
+                let shown = file
+                    .page_errors
+                    .iter()
+                    .take(3)
+                    .map(|message| format!("{:?}", message.chars().take(200).collect::<String>()))
+                    .collect::<Vec<_>>();
+                recording.push(format!(
+                    "{}: allowPageErrors tolerated {} page errors during collection: {}{}",
+                    file.scenario,
+                    file.page_errors.len(),
+                    shown.join(", "),
+                    if file.page_errors.len() > 3 {
+                        ", ..."
+                    } else {
+                        ""
+                    }
+                ));
+            }
             for script in file.scripts {
                 coverage::validate_path(&script.path)?;
                 index.entry(script.path).or_default().push(Observation {
@@ -361,5 +393,10 @@ pub fn load(
             root.display()
         );
     }
-    Ok((index, scenarios, warnings))
+    Ok(Loaded {
+        index,
+        scenarios,
+        warnings,
+        recording_warnings: recording,
+    })
 }

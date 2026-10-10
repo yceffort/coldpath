@@ -153,7 +153,7 @@ initial: aborted requests to origins outside --allow-origin and --cdn-prefix: ht
 
 A page error (an uncaught exception or an unhandled promise rejection) fails the scenario by default. `allowPageErrors: true` tolerates every page error; a list of regular expressions (`--allow-page-error REGEX`, repeatable) tolerates errors whose message matches one of them. Tolerated errors stay in the envelope's `pageErrors`, and other errors still fail the scenario with their messages.
 
-`profile` applies `expect` and `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`.
+`profile` applies `expect` and `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`. The analyzer reports what an envelope recorded: a scenario with aborted origins (`blockedOrigins`) or tolerated page errors gets a recording warning, which is printed to stderr, listed in JSON `recordingWarnings`, and shown above the totals in Markdown and at the top of both HTML reports.
 
 ## Unsupported: workers
 

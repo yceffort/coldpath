@@ -7,8 +7,9 @@ import {createServer} from 'node:http'
 import type {RequestListener, ServerResponse} from 'node:http'
 import type {AddressInfo} from 'node:net'
 import {join} from 'node:path'
-import {fileURLToPath} from 'node:url'
+import {fileURLToPath, pathToFileURL} from 'node:url'
 import {promisify} from 'node:util'
+import {chromium} from '@playwright/test'
 
 const run = promisify(execFile)
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -187,6 +188,38 @@ try {
   await assert.rejects(record('error-other', '/error', ['--allow-page-error', '^other']), /page threw 1 runtime errors/)
   await record('error-allowed', '/error', ['--allow-page-error', '^flaky'])
   assert.deepEqual(JSON.parse(await readFile(join(artifacts, 'error-allowed.coverage.json'), 'utf8')).pageErrors, ['flaky request'])
+
+  // analyze puts what the collector reported above the numbers: stderr, Markdown, and both HTML pages.
+  const {stderr: analyzed} = await run(binary, [
+    '--dir',
+    fixture,
+    ...['api-blocked', 'error-allowed'].flatMap((name) => ['--coverage', join(artifacts, `${name}.coverage.json`)]),
+    '--markdown',
+    join(artifacts, 'notes.md'),
+    '--html',
+    join(artifacts, 'notes-report.html'),
+    '--treemap',
+    join(artifacts, 'notes.html'),
+  ])
+  assert(analyzed.includes(`recording warning: api-blocked: the collector aborted requests to ${apiOrigin} because`), analyzed)
+  const markdown = await readFile(join(artifacts, 'notes.md'), 'utf8')
+  assert(markdown.includes('> - error-allowed: allowPageErrors tolerated 1 page errors during collection: "flaky request"'), markdown)
+  const browser = await chromium.launch()
+  try {
+    for (const file of ['notes-report.html', 'notes.html']) {
+      const page = await browser.newPage()
+      await page.goto(pathToFileURL(join(artifacts, file)).href)
+      const notes = page.locator('#recording-warnings')
+      await notes.waitFor({state: 'visible'})
+      assert.match(
+        (await notes.textContent())!,
+        /api-blocked: the collector aborted requests to .*error-allowed: allowPageErrors tolerated 1 page errors/,
+      )
+      await page.close()
+    }
+  } finally {
+    await browser.close()
+  }
 
   // A CDN copy that differs from the local build is rejected like a stale local file.
   cdnSuffix = '\n'

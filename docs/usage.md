@@ -132,6 +132,8 @@ coldpath --dir dist \
 
 JSON uses `schemaVersion: 3`, reflecting normalized source identities. Regenerate older baselines; their raw source strings cannot reliably be compared with normalized identities. Summary output includes totals, bundles, source/package attribution, `bundles[].sources`, `scenarioReports`, the `sourcePaths` convention, warnings, and verification evidence. Add `--details` for `bundles[].spans`, `bundles[].scenarioSpans`, `generatedSource`, and embedded original code. Requesting HTML does not automatically make JSON detailed.
 
+`recordingWarnings` lists what the collector recorded about the page state of each coldpath envelope: origins it aborted requests to (`blockedOrigins`) and page errors that `allowPageErrors` tolerated (`pageErrors`). The numbers describe that state, so the CLI prints these warnings to stderr, Markdown shows them above the totals, and both HTML reports show them at the top. See [checking the page state](collecting.md#checking-the-page-state).
+
 In detailed output, `spans[].source` indexes that bundle's `sources` array. `start/end` are half-open UTF-8 byte offsets; `startUtf16/endUtf16` are JavaScript string offsets. `original` identifies a zero-based source-map line/column anchor, not an original execution range. Sources without `sourcesContent` show positions only.
 
 Inspector HTML stores details by chunk and decodes them on demand. Blocks larger than 16 KiB use gzip/base64 and require `DecompressionStream`. Code views render a window around the selected range; data remains complete even when the visible generated snippet is truncated. Both HTML reports work through `file://` and make no external network requests.
