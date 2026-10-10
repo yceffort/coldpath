@@ -23,6 +23,16 @@ pub struct CoverageFile {
     /// Page errors that `allowPageErrors` tolerated.
     #[serde(default)]
     pub page_errors: Vec<String>,
+    /// Scripts that only router prefetches for other routes loaded, left out of `scripts`.
+    #[serde(default)]
+    pub prefetched_scripts: Vec<PrefetchedScript>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PrefetchedScript {
+    pub path: String,
+    /// Paths of the routes whose prefetch responses named the script.
+    pub routes: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

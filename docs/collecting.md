@@ -140,6 +140,14 @@ Envelope scripts record the browser `url` they were matched from.
 
 A scenario that calls an API or loads other resources from another origin needs that origin in `--allow-origin` (repeatable; `allowOrigins` in a scenario file, at the top level or per scenario), such as `https://api.example.com`. Requests to it pass through and appear in the envelope's `requests`; scripts it serves are not attributed, so list a script origin under `--cdn-prefix` instead. `environment.allowedOrigins` records the allowed origins. The recording then depends on what that service returned at the time, so a different response can change which code runs.
 
+## Router prefetches
+
+A Next.js App Router page prefetches the routes of visible links, and a page segment prefetch also loads the client chunks of that route. The chunk registers its modules without evaluating them, so the recorded page would count another route's code as unobserved. The collector leaves such a script out of `scripts` and lists it in the envelope's `prefetchedScripts` with the routes that named it when three things hold: the response to a request with a `Next-Router-Prefetch` header names the script's path, no main document or other RSC response names it, and no function in it ran beyond its top level. Its bundle then counts as unmeasured in that scenario. A script that the page itself references, or whose modules ran, stays recorded. The summary lists what was left out:
+
+```text
+initial: left out scripts that only router prefetches for other routes loaded: chunks/1v61rpt861wcs.js (/about)
+```
+
 ## Checking the page state
 
 Coverage numbers describe the page the browser showed, which can be an error or loading screen when a request was blocked or failed. After each scenario, `collect` prints the final URL, the status of the last main document response, and the numbers of console errors and page errors to stderr, plus the number of aborted requests per origin when the [origin policy](#other-origins) blocked any:
@@ -153,7 +161,7 @@ initial: aborted requests to origins outside --allow-origin and --cdn-prefix: ht
 
 A page error (an uncaught exception or an unhandled promise rejection) fails the scenario by default. `allowPageErrors: true` tolerates every page error; a list of regular expressions (`--allow-page-error REGEX`, repeatable) tolerates errors whose message matches one of them. Tolerated errors stay in the envelope's `pageErrors`, and other errors still fail the scenario with their messages.
 
-`profile` applies `expect` and `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`. The analyzer reports what an envelope recorded: a scenario with aborted origins (`blockedOrigins`) or tolerated page errors gets a recording warning, which is printed to stderr, listed in JSON `recordingWarnings`, and shown above the totals in Markdown and at the top of both HTML reports.
+`profile` applies `expect` and `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`. The analyzer reports what an envelope recorded: a scenario with aborted origins (`blockedOrigins`), tolerated page errors, or [scripts left out after router prefetches](#router-prefetches) (`prefetchedScripts`) gets a recording warning, which is printed to stderr, listed in JSON `recordingWarnings`, and shown above the totals in Markdown and at the top of both HTML reports.
 
 ## Unsupported: workers
 

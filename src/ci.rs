@@ -136,7 +136,7 @@ pub fn markdown(report: &Report) -> String {
         report.totals.unmeasured_bytes
     );
     if !report.recording_warnings.is_empty() {
-        out.push_str("\n> [!WARNING]\n> The collector reported page state problems. These numbers describe the page as it was recorded.\n>\n");
+        out.push_str("\n> [!WARNING]\n> The collector reported page state problems or left scripts out. These numbers describe the page as it was recorded.\n>\n");
         for warning in &report.recording_warnings {
             out.push_str(&format!("> - {}\n", escape_markdown(warning)));
         }
