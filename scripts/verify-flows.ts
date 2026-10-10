@@ -45,7 +45,9 @@ const api = await listen((_request, response) => {
   response.end('pong')
 })
 const apiOrigin = `http://127.0.0.1:${(api.address() as AddressInfo).port}`
+let header: string | undefined
 const app = await listen(async (request, response) => {
+  if (request.url === '/api') header = request.headers['x-coldpath'] as string | undefined
   if (request.url === '/')
     html(response, `<script src="${cdnPrefix}cdn.js"></script><script src="/assets/first.js"></script><a href="/second">next</a>`)
   else if (request.url === '/api')
@@ -148,6 +150,24 @@ try {
   assert(apiAllowed.requests.some((r: any) => r.path === `${apiOrigin}/ping` && r.type === 'fetch'))
   await assert.rejects(recordApi('api-path', ['--allow-origin', `${apiOrigin}/v1`]), /--allow-origin must be an http\(s\) origin/)
 
+  // A setup export runs before navigation, so its routes answer API calls before the origin policy; header values stay out of the file.
+  const mock = join(artifacts, 'mock.mjs')
+  await writeFile(
+    mock,
+    `export async function setup({context}) {
+  await context.route('${apiOrigin}/**', (route) => route.fulfill({body: 'mocked', headers: {'access-control-allow-origin': '*'}}))
+}\n`,
+  )
+  await recordApi('api-mocked', ['--actions', mock, '--header', 'x-coldpath: secret-value'])
+  const apiMocked = JSON.parse(await readFile(join(artifacts, 'api-mocked.coverage.json'), 'utf8'))
+  assert.equal(apiHits, 1)
+  assert.equal(header, 'secret-value')
+  assert.deepEqual(apiMocked.blockedOrigins, [])
+  assert.deepEqual(apiMocked.environment.extraHTTPHeaders, ['x-coldpath'])
+  assert(!JSON.stringify(apiMocked).includes('secret-value'))
+  assert.match(apiMocked.environment.observation, /^setup before navigation; navigation networkidle \+ 0ms; \d+ coverage snapshots/)
+  await assert.rejects(recordApi('api-header', ['--header', 'x-coldpath']), /--header must be 'NAME: VALUE'/)
+
   // A CDN copy that differs from the local build is rejected like a stale local file.
   cdnSuffix = '\n'
   await assert.rejects(collect('stale', ['--cdn-prefix', cdnPrefix]), /browser\/disk source mismatch: cdn\.js/)
@@ -155,5 +175,5 @@ try {
   await Promise.all([app, cdn, api].map((server) => new Promise((resolve) => server.close(resolve))))
 }
 console.log(
-  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins and stale CDN rejection.',
+  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, setup routes, extra headers and stale CDN rejection.',
 )

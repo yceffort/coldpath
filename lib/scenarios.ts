@@ -37,6 +37,7 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
       cdnPrefixes: option('cdnPrefixes'),
       allowOrigins: option('allowOrigins'),
       storageState: storageState && resolve(base, storageState),
+      extraHTTPHeaders: option('extraHTTPHeaders'),
       browserPath: browserPath && resolve(base, browserPath),
       browserChannel: option('browserChannel'),
       url: config.url ? new URL(url, config.url).href : url,

@@ -34,12 +34,13 @@ export interface CaptureOptions {
   network?: Network
   cpuSlowdown?: number
   storageState?: string
+  extraHTTPHeaders?: Record<string, string>
   browserPath?: string
   browserChannel?: string
 }
 
 type Playwright = typeof import('playwright')
-// Custom interactions run after the page loads.
+// Custom interactions run after the page loads; an actions module's `setup` export runs before the first navigation.
 export type Action = (page: {page: Page; context: Awaited<ReturnType<Browser['newContext']>>}) => Promise<void>
 
 // Playwright is an optional peer: only collection needs it.
@@ -86,6 +87,7 @@ export async function prepare(
     network,
     cpuSlowdown,
     storageState,
+    extraHTTPHeaders,
     browserPath,
     browserChannel,
   }: CaptureOptions,
@@ -117,10 +119,21 @@ export async function prepare(
   const allowed = new Set([target.origin, ...remotes.map((remote) => new URL(remote).origin), ...origins])
   const root = await realpath(resolve(dir))
   let action: Action | undefined
+  let beforeNavigation: Action | undefined
   if (actions) {
-    action = (await import(pathToFileURL(resolve(actions)).href)).default
-    assert.equal(typeof action, 'function', '--actions must default-export a function')
+    const module = await import(pathToFileURL(resolve(actions)).href)
+    action = module.default
+    beforeNavigation = module.setup
+    assert(
+      [action, beforeNavigation].every((f) => f === undefined || typeof f === 'function') && (action || beforeNavigation),
+      '--actions must export a default function, a setup function, or both',
+    )
   }
+  assert(
+    extraHTTPHeaders === undefined ||
+      (typeof extraHTTPHeaders === 'object' && Object.values(extraHTTPHeaders).every((value) => typeof value === 'string')),
+    'extraHTTPHeaders must map header names to strings',
+  )
   if (network) {
     for (const key of ['latencyMs', 'downloadKbps', 'uploadKbps'] as const) {
       assert(Number.isFinite(network[key]) && network[key] >= 0, `network.${key} must be a nonnegative number`)
@@ -161,12 +174,14 @@ export async function prepare(
     allowed,
     root,
     action,
+    beforeNavigation,
     waitMs,
     scenario,
     device,
     network,
     cpuSlowdown,
     storageState,
+    extraHTTPHeaders,
     browserPath,
     browserChannel,
     launch,
@@ -177,15 +192,17 @@ export async function prepare(
 }
 
 // A page with the shared emulation, network policy, and throttling. `beforeunload` adds the
-// listener that lets collect pause each document before it unloads.
+// listener that lets collect pause each document before it unloads. The actions module's
+// `setup` runs last, so its routes take precedence over the origin policy.
 export type Setup = Awaited<ReturnType<typeof prepare>>
 
 export async function open(browser: Browser, setup: Setup, {beforeunload = false} = {}) {
-  const {target, allowed, emulation, storageState, network, cpuSlowdown} = setup
+  const {target, allowed, emulation, storageState, extraHTTPHeaders, network, cpuSlowdown, beforeNavigation} = setup
   const context = await browser.newContext({
     ...emulation,
     serviceWorkers: 'block',
     ...(storageState ? {storageState: resolve(storageState)} : {}),
+    ...(extraHTTPHeaders ? {extraHTTPHeaders} : {}),
   })
   const blocked = new Set<string>()
   const requests: {path: string; type: string}[] = []
@@ -218,6 +235,7 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
     })
   }
   if (cpuSlowdown) await cdp.send('Emulation.setCPUThrottlingRate', {rate: cpuSlowdown})
+  if (beforeNavigation) await beforeNavigation({page, context})
   return {context, page, cdp, errors, blocked, requests}
 }
 
@@ -241,7 +259,19 @@ export async function verifyScript(cdp: CDPSession, root: string, scriptId: stri
 
 // Capture settings recorded in coverage and profile files.
 export async function environment(browser: Browser, page: Page, setup: Setup) {
-  const {playwright, device, emulation, network, cpuSlowdown, storageState, remotes, origins, browserPath, browserChannel} = setup
+  const {
+    playwright,
+    device,
+    emulation,
+    network,
+    cpuSlowdown,
+    storageState,
+    extraHTTPHeaders,
+    remotes,
+    origins,
+    browserPath,
+    browserChannel,
+  } = setup
   const exceptions = [remotes.length && '--cdn-prefix', origins.length && '--allow-origin'].filter(Boolean)
   return {
     browser: browser.version(),
@@ -261,6 +291,8 @@ export async function environment(browser: Browser, page: Page, setup: Setup) {
     cpuSlowdown: cpuSlowdown ?? 1,
     // Records only whether a saved state was loaded; its cookies stay out of the artifact.
     storageState: Boolean(storageState),
+    // Header names only, when set: values can be credentials.
+    ...(extraHTTPHeaders && Object.keys(extraHTTPHeaders).length ? {extraHTTPHeaders: Object.keys(extraHTTPHeaders).sort()} : {}),
     serviceWorkers: 'blocked',
     externalRequests: exceptions.length ? `blocked except ${exceptions.join(' and ')} origins` : 'blocked',
     cdnPrefixes: remotes,
@@ -273,7 +305,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
   const {out} = options
   assert(options.url && options.dir && out, 'url, dir and out are required')
   const setup = await prepare(options, 'collect')
-  const {target, root, action, waitMs, scenario, localPath} = setup
+  const {target, root, action, beforeNavigation, waitMs, scenario, localPath} = setup
 
   const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
@@ -345,7 +377,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
       environment: {
         ...(await environment(browser, page, setup)),
         scope: 'page CDP target only; no worker coverage',
-        observation: `navigation networkidle + ${waitMs}ms${action ? '; then custom actions' : ''}; ${snapshots} coverage snapshots (before each unload and at the end)`,
+        observation: `${beforeNavigation ? 'setup before navigation; ' : ''}navigation networkidle + ${waitMs}ms${action ? '; then custom actions' : ''}; ${snapshots} coverage snapshots (before each unload and at the end)`,
       },
       url: target.href,
       requests,
