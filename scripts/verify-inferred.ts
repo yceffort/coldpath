@@ -1,7 +1,7 @@
 // snapshot -> modules -> label -> analyze against a local site whose chunk has no reachable map.
 import assert from 'node:assert/strict'
 import {execFile, execFileSync} from 'node:child_process'
-import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
+import {mkdir, mkdtemp, readdir, readFile, rm, writeFile} from 'node:fs/promises'
 import {createServer} from 'node:http'
 import type {AddressInfo} from 'node:net'
 import {tmpdir} from 'node:os'
@@ -114,6 +114,12 @@ const pages: Record<string, [string, string]> = {
   '/f/shared.js': ['text/javascript', 'function onlySecond(){return 2}\nif(location.pathname==="/second.html")onlySecond()'],
   '/f/second.js': ['text/javascript', 'window.second=1'],
   '/f/late2.js': ['text/javascript', 'window.late2=1'],
+  // Paths that decode to `..` segments (#66): a script URL, and a map URL from a script's sourceMappingURL.
+  '/escape.html': ['text/html', '<!doctype html><script src="/..%2F..%2F..%2Fescaped.js"></script>'],
+  '/..%2F..%2F..%2Fescaped.js': ['text/javascript', 'window.escaped=1'],
+  '/escape-map.html': ['text/html', '<!doctype html><script src="/e/map.js"></script>'],
+  '/e/map.js': ['text/javascript', 'window.escaped=2\n//# sourceMappingURL=..%2F..%2F..%2F..%2Fescaped.js.map'],
+  '/e/..%2F..%2F..%2F..%2Fescaped.js.map': ['application/json', JSON.stringify({version: 3, sources: [], names: [], mappings: ''})],
 }
 const site = createServer((request, response) => {
   const page = pages[request.url!]
@@ -513,6 +519,18 @@ try {
     cli('snapshot', '--url', origin + '/', '--out', flows, '--wait-ms', '500', '--scenario', 'third'),
     /dyn\.js differs from the copy an earlier snapshot saved/,
   )
+  // The site chooses script and map URLs: one that would land outside --out fails the snapshot and names the URL.
+  const escape = join(out, 'escape')
+  await mkdir(escape)
+  await assert.rejects(
+    cli('snapshot', '--url', origin + '/escape.html', '--out', join(escape, 'out'), '--wait-ms', '0'),
+    /cannot save http:\/\/\S+\/\.\.%2F\.\.%2F\.\.%2Fescaped\.js:/,
+  )
+  await assert.rejects(
+    cli('snapshot', '--url', origin + '/escape-map.html', '--out', join(escape, 'out'), '--wait-ms', '0'),
+    /cannot save http:\/\/\S+\/e\/\.\.%2F\.\.%2F\.\.%2F\.\.%2Fescaped\.js\.map:/,
+  )
+  assert.deepEqual(await readdir(escape), ['out'])
   // An installed browser by Playwright channel; an unknown channel fails in Playwright's launch.
   const channel = join(out, 'channel')
   await cli('snapshot', '--url', origin + '/', '--out', channel, '--wait-ms', '0', '--browser-channel', 'chromium')

@@ -2,7 +2,7 @@
 // The saved script text is the evidence; the analyzer compares coverage against it offline.
 import assert from 'node:assert/strict'
 import {mkdir, readFile, writeFile} from 'node:fs/promises'
-import {dirname, join, resolve} from 'node:path'
+import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path'
 import {pathToFileURL} from 'node:url'
 
 import {launchOptions, loadPlaywright} from './collect.ts'
@@ -10,9 +10,22 @@ import {launchOptions, loadPlaywright} from './collect.ts'
 const EMPTY_MAP = JSON.stringify({version: 3, sources: [], names: [], mappings: ''})
 
 // Analysis-root-relative path, matching the analyzer's `--url-prefix https://` mapping.
+// The site chooses the URL, and the URL parser resolves `..` segments but keeps `%2F`, which decodes to a slash.
 const bundlePath = (url: URL) => {
   const {host, pathname} = new URL(url)
-  return host + decodeURIComponent(pathname)
+  const path = host + decodeURIComponent(pathname)
+  assert(
+    !path.includes('\\') && !isAbsolute(path) && path.split('/').every((segment) => segment !== '.' && segment !== '..'),
+    `cannot save ${url.href}: its decoded path must not be absolute or contain a backslash or a . or .. segment`,
+  )
+  return path
+}
+
+// Where a path checked by bundlePath is written: it must stay inside `dir`.
+const inside = (dir: string, file: string) => {
+  const local = relative(dir, file)
+  assert(local && local !== '..' && !local.startsWith(`..${sep}`) && !isAbsolute(local), `${file} is outside ${dir}`)
+  return file
 }
 
 const readJson = async (file: string, fallback: unknown) => {
@@ -155,18 +168,19 @@ export async function snapshot({
     }
     if (!/\.(m|c)?js$/.test(scriptUrl.pathname)) continue
     const path = bundlePath(scriptUrl)
+    const file = inside(files, join(files, path))
     // A script appears once per snapshot; the analyzer unions repeated entries of one recording.
     coverage.push(entry)
     if (seen.has(path)) {
-      assert((await readFile(join(files, path), 'utf8')) === entry.source, `${path} changed between documents of one visit`)
+      assert((await readFile(file, 'utf8')) === entry.source, `${path} changed between documents of one visit`)
       continue
     }
     seen.add(path)
-    const earlier = await readFile(join(files, path), 'utf8').catch(() => undefined)
+    const earlier = await readFile(file, 'utf8').catch(() => undefined)
     assert(earlier === undefined || earlier === entry.source, `${path} differs from the copy an earlier snapshot saved in ${out}`)
     if (earlier !== undefined) continue
-    await mkdir(dirname(join(files, path)), {recursive: true})
-    await writeFile(join(files, path), entry.source)
+    await mkdir(dirname(file), {recursive: true})
+    await writeFile(file, entry.source)
 
     const key = scriptUrl.href.split(/[?#]/)[0]
     const {documentURL, ...request} = requests.get(key) ?? {}
@@ -192,8 +206,9 @@ export async function snapshot({
       text = undefined
     }
     const mapPath = text === undefined ? `maps/${path}.map` : `files/${bundlePath(mapUrl)}`
-    await mkdir(dirname(join(out, mapPath)), {recursive: true})
-    await writeFile(join(out, mapPath), text ?? EMPTY_MAP)
+    const mapFile = inside(join(out, text === undefined ? 'maps' : 'files'), join(out, mapPath))
+    await mkdir(dirname(mapFile), {recursive: true})
+    await writeFile(mapFile, text ?? EMPTY_MAP)
     bindings[path] = mapPath
   }
   const coverageFile = scenario ? join(out, 'coverage', `${scenario}.json`) : join(out, 'coverage.json')
