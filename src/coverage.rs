@@ -16,6 +16,9 @@ pub struct Interval {
 pub struct CoverageFile {
     pub schema_version: u32,
     pub scenario: String,
+    /// One-based run number of a `collect --repeat` recording.
+    #[serde(default)]
+    pub run: Option<u32>,
     pub scripts: Vec<ScriptCoverage>,
     /// Origins the collector aborted requests to.
     #[serde(default)]
@@ -26,6 +29,11 @@ pub struct CoverageFile {
     /// Scripts that only router prefetches for other routes loaded, left out of `scripts`.
     #[serde(default)]
     pub prefetched_scripts: Vec<PrefetchedScript>,
+    /// Scripts that only router prefetches for other routes loaded but whose modules
+    /// evaluated; still in `scripts`. The analyzer leaves them out when only module
+    /// evaluation ran.
+    #[serde(default)]
+    pub prefetch_evaluated_scripts: Vec<PrefetchedScript>,
 }
 
 #[derive(Debug, Deserialize)]

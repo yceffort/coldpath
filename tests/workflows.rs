@@ -1276,3 +1276,598 @@ fn package_importers_name_the_first_party_imports_that_load_a_dependency() {
         "| b | 4 | 4 | 0 | src/features/auth/login.js via a, src/features/cart/cart.js via a |"
     ));
 }
+
+#[test]
+fn baselines_record_their_mode_and_reject_the_other_mode() {
+    let f = Fixture::new();
+    f.write("app.js", "abcd");
+    f.map(&["src/a.js"]);
+    let coverage = f.coverage(
+        "initial",
+        "abcd",
+        json!([{"startOffset":0,"endOffset":2,"count":1}]),
+    );
+    let fixed = coldpath::analyze(&f.0, &[]).unwrap();
+    let covered = coldpath::analyze(&f.0, &[coverage]).unwrap();
+    assert_eq!(fixed.mode, "static");
+    assert_eq!(covered.mode, "coverage");
+    let fixed_json = serde_json::to_vec(&fixed).unwrap();
+    let covered_json = serde_json::to_vec(&covered).unwrap();
+    assert!(coldpath::baseline::compare(&fixed, &fixed_json).is_ok());
+    assert!(coldpath::baseline::compare(&covered, &covered_json).is_ok());
+    let error = coldpath::baseline::compare(&covered, &fixed_json)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains(
+            "baseline mode mismatch: the baseline is a static analysis (no coverage) and this one is a coverage analysis (scenarios [\"initial\"])"
+        ),
+        "{error}"
+    );
+    assert!(coldpath::baseline::compare(&fixed, &covered_json).is_err());
+    // A baseline from before `mode` existed is classified by its scenarios.
+    let mut old: Value = serde_json::from_slice(&fixed_json).unwrap();
+    old.as_object_mut().unwrap().remove("mode");
+    let old = old.to_string().into_bytes();
+    assert!(coldpath::baseline::compare(&fixed, &old).is_ok());
+    assert!(coldpath::baseline::compare(&covered, &old).is_err());
+    // Inconsistent counts name the row and the numbers.
+    let mut bad: Value = serde_json::from_slice(&fixed_json).unwrap();
+    bad["packages"][0]["observedBytes"] = json!(99);
+    let error = coldpath::baseline::compare(&fixed, &bad.to_string().into_bytes())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains(
+            "invalid baseline counts for \"[application]\": observed 99 + unobserved 0 + unmeasured 4 is not bytes 4"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn package_budgets_limit_growth_and_new_packages() {
+    let f = Fixture::new();
+    let map = |sources: Vec<&str>, mappings: &str| {
+        json!({"version":3,"sources":sources,"names":[],"mappings":mappings}).to_string()
+    };
+    f.write("app.js", "abcdefgh");
+    f.write(
+        "app.js.map",
+        &map(vec!["src/main.js", "node_modules/a/index.js"], "AAAA,ICAA"),
+    );
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args(["--dir", ".", "--json", "-"])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let baseline = run(&[]);
+    assert!(baseline.status.success());
+    fs::write(f.0.join("main.json"), &baseline.stdout).unwrap();
+    // Package a grows by 4 bytes and b is new.
+    f.write("app.js", "abcdefghijklmnop");
+    f.write(
+        "app.js.map",
+        &map(
+            vec![
+                "src/main.js",
+                "node_modules/a/index.js",
+                "node_modules/b/index.js",
+            ],
+            "AAAA,ICAA,QCAA",
+        ),
+    );
+    let failures = |output: &std::process::Output| {
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        report["budgetFailures"].clone()
+    };
+    let output = run(&[
+        "--baseline",
+        "main.json",
+        "--max-added-package-bytes",
+        "a=3",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(failures(&output), json!(["package a: +4 exceeds budget 3"]));
+    assert!(
+        run(&[
+            "--baseline",
+            "main.json",
+            "--max-added-package-bytes",
+            "a=4"
+        ])
+        .status
+        .success()
+    );
+    let output = run(&["--baseline", "main.json", "--fail-on-new-package"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        failures(&output),
+        json!(["new package b: 4 bytes, not in the baseline"])
+    );
+    assert!(
+        run(&[
+            "--baseline",
+            "main.json",
+            "--fail-on-new-package",
+            "--allow-new-package",
+            "b"
+        ])
+        .status
+        .success()
+    );
+    assert_eq!(
+        run(&["--baseline", "main.json", "--max-added-package-bytes", "a"])
+            .status
+            .code(),
+        Some(1)
+    );
+    // The same budgets in the config; without a baseline they are reported as unchecked.
+    f.write(
+        "ci.json",
+        r#"{"budgets":{"maxAddedPackageBytes":{"a":3},"failOnNewPackages":true,"allowedNewPackages":["c"]}}"#,
+    );
+    let output = run(&["--config", "ci.json"]);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let warnings = report["warnings"].to_string();
+    assert!(
+        warnings.contains("budgets.maxAddedPackageBytes compares against a baseline")
+            && warnings.contains("budgets.failOnNewPackages compares against a baseline"),
+        "{warnings}"
+    );
+    let output = run(&["--config", "ci.json", "--baseline", "main.json"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(failures(&output).as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn unmeasured_and_unmapped_breakdowns_name_bundles_and_causes() {
+    let f = Fixture::new();
+    f.write("app.js", "abcd");
+    f.map(&["src/a.js"]);
+    // No map at all, and a map whose mappings stop before the last line.
+    f.write("other.js", "unused!");
+    f.write("third.js", "xy\nz");
+    f.write(
+        "third.js.map",
+        &json!({"version":3,"sources":["src/t.js"],"names":[],"mappings":"AAAA"}).to_string(),
+    );
+    let path = f.coverage(
+        "initial",
+        "abcd",
+        json!([{"startOffset":0,"endOffset":4,"count":1}]),
+    );
+    let mut envelope: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    envelope["prefetchedScripts"] =
+        json!([{"path": "third.js", "url": "http://127.0.0.1/third.js", "routes": ["/t"]}]);
+    fs::write(&path, envelope.to_string()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--dir", ".", "--coverage", "initial", "--limit", "1"])
+        .args(["--json", "-", "--markdown", "summary.md"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["unmeasured"],
+        json!({"bytes": 11, "notRecordedBytes": 7, "prefetchOnlyBytes": 4, "bundles": [
+            {"path": "other.js", "bytes": 7, "reason": "not-recorded"},
+            {"path": "third.js", "bytes": 4, "reason": "prefetch-only", "scenarios": ["initial"]}
+        ]})
+    );
+    assert_eq!(
+        report["scenarioReports"][0]["unmeasuredBundles"],
+        report["unmeasured"]["bundles"]
+    );
+    assert_eq!(
+        report["unmapped"],
+        json!({"bytes": 9, "bundlesWithoutMap": 1, "bytesWithoutMap": 7, "bundlesWithGaps": 1, "gapBytes": 2})
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Unmeasured: 11 bytes in 2 bundles no scenario recorded (7 not loaded, 4 left out after router prefetches):")
+            && stderr.contains("           7  other.js  no scenario loaded it")
+            && stderr.contains("... and 1 more in the JSON report")
+            && stderr.contains("Unmapped: 9 bytes (7 in 1 bundles without a source map, 2 in mapping gaps of 1 mapped bundles)"),
+        "{stderr}"
+    );
+    let md = fs::read_to_string(f.0.join("summary.md")).unwrap();
+    assert!(
+        md.contains("## Unmeasured bytes")
+            && md.contains("| other.js | 7 | no scenario loaded it |")
+            && md.contains(
+                "| third.js | 4 | left out: only router prefetches for other routes loaded it (initial) |"
+            )
+            && md.contains("`[unmapped]` holds 9 B"),
+        "{md}"
+    );
+}
+
+#[test]
+fn initial_html_names_the_bundles_a_document_loads() {
+    let f = Fixture::new();
+    f.write("app.js", "abcd");
+    f.write("lazy.js", "efghij");
+    f.write("index.html", "<html><head><script src=\"/assets/app.js\" async></script><script>self.__next_f.push([1,\"\\\"static/lazy.js.map\\\"\"])</script></head></html>");
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args(["--dir", ".", "--initial-html", "index.html", "--json", "-"])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let output = run(&["--markdown", "summary.md", "--export", "evidence"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    // lazy.js.map is not lazy.js: paths match as whole segments.
+    assert_eq!(
+        report["initialLoad"],
+        json!({"html": "index.html", "bytes": 4, "bundles": ["app.js"]})
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("Initial load named by index.html: 4 bytes in 1 bundles")
+    );
+    assert!(
+        fs::read_to_string(f.0.join("summary.md"))
+            .unwrap()
+            .contains("Initial load named by `index.html`: **4 B** in 1 bundles")
+    );
+    fs::write(f.0.join("main.json"), &output.stdout).unwrap();
+    let output = run(&["--max-initial-bytes", "3"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("budget failed: initial-load bytes: 4 exceeds budget 3")
+    );
+    // The evidence replays with the document.
+    let replayed = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--replay", "evidence", "--json", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        replayed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replayed.stderr)
+    );
+    let replay: Value = serde_json::from_slice(&replayed.stdout).unwrap();
+    assert_eq!(replay["initialLoad"]["bytes"], 4);
+    // Growth against the baseline, with the bundles that entered the initial load.
+    f.write("app.js", "abcdef");
+    f.write("index.html", "<script src=\"/assets/app.js\"></script><link rel=\"modulepreload\" href=\"/assets/lazy.js\">");
+    let output = run(&["--baseline", "main.json", "--max-added-initial-bytes", "1"]);
+    assert_eq!(output.status.code(), Some(2));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["baseline"]["initialLoad"],
+        json!({"beforeBytes": 4, "afterBytes": 12, "deltaBytes": 8, "addedBundles": ["lazy.js"], "removedBundles": []})
+    );
+    assert_eq!(
+        report["budgetFailures"],
+        json!(["initial-load byte growth: +8 exceeds budget 1"])
+    );
+    // A baseline made without --initial-html cannot be compared.
+    let mut old: Value = serde_json::from_slice(&fs::read(f.0.join("main.json")).unwrap()).unwrap();
+    old.as_object_mut().unwrap().remove("initialLoad");
+    f.write("old.json", &old.to_string());
+    let output = run(&["--baseline", "old.json", "--max-added-initial-bytes", "1"]);
+    assert_eq!(output.status.code(), Some(2));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["baseline"]["warnings"]
+            .to_string()
+            .contains("The baseline has no initial load")
+    );
+    assert!(
+        report["budgetFailures"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("initial-load byte growth: cannot check budget")
+    );
+    f.write("index.html", "<html>nothing</html>");
+    let output = run(&[]);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["warnings"]
+            .to_string()
+            .contains("names none of the analyzed bundles")
+    );
+}
+
+#[test]
+fn repeated_runs_report_their_spread_per_scenario_package_and_source() {
+    let f = Fixture::new();
+    let source = "abcdefgh";
+    f.write("app.js", source);
+    f.map(&["src/a.js", "node_modules/p/index.js"]);
+    f.write("other.js", "wxyz");
+    f.write(
+        "other.js.map",
+        &json!({"version":3,"sources":["src/o.js"],"names":[],"mappings":"AAAA"}).to_string(),
+    );
+    let run = |number: u32, ranges: Value, other: bool| {
+        let mut scripts = vec![
+            json!({"path":"app.js","sha256":sha256(source.as_bytes()),"sourceMapSha256":sha256(&fs::read(f.0.join("app.js.map")).unwrap()),"functions":[{"isBlockCoverage":true,"ranges":ranges}]}),
+        ];
+        if other {
+            scripts.push(json!({"path":"other.js","sha256":sha256(b"wxyz"),"sourceMapSha256":sha256(&fs::read(f.0.join("other.js.map")).unwrap()),"functions":[{"isBlockCoverage":true,"ranges":[{"startOffset":0,"endOffset":4,"count":1}]}]}));
+        }
+        f.write(
+            &format!("scroll-{number}"),
+            &json!({"schemaVersion":1,"scenario":"scroll","run":number,"scripts":scripts})
+                .to_string(),
+        )
+    };
+    // Run 1 executes 2 bytes of a and loads other.js; run 2 executes 6 bytes (a and p) without other.js.
+    let files = [
+        run(1, json!([{"startOffset":0,"endOffset":2,"count":1}]), true),
+        run(2, json!([{"startOffset":0,"endOffset":6,"count":1}]), false),
+    ];
+    let report = analyze_with_options(&f.0, &files, &AnalyzeOptions::default()).unwrap();
+    // The scenario itself unions the runs, as before.
+    assert_eq!(report.scenario_reports[0].totals.observed_bytes, 10);
+    let runs = &report.runs;
+    assert_eq!(runs.len(), 1);
+    let run = &runs[0];
+    assert_eq!((run.scenario.as_str(), run.runs), ("scroll", 2));
+    let spread = |s: &coldpath::Spread| (s.min, s.max, s.mean, s.stddev);
+    assert_eq!(spread(&run.totals.observed_bytes), (6, 6, 6.0, 0.0));
+    assert_eq!(
+        spread(&run.totals.unobserved_bytes),
+        (2, 6, 4.0, 2.0f64.sqrt() * 2.0)
+    );
+    assert_eq!(
+        spread(&run.totals.unmeasured_bytes),
+        (0, 4, 2.0, 2.0f64.sqrt() * 2.0)
+    );
+    let package = |name: &str| run.packages.iter().find(|p| p.package == name).unwrap();
+    assert_eq!(
+        spread(&package("p").spread.observed_bytes),
+        (0, 2, 1.0, 2.0f64.sqrt())
+    );
+    assert_eq!(package("[application]").spread.unmeasured_bytes.max, 4);
+    assert_eq!(
+        run.varying_sources
+            .iter()
+            .map(|s| (
+                s.source.as_str(),
+                s.spread.observed_bytes.min,
+                s.spread.observed_bytes.max,
+                s.spread.unmeasured_bytes.max
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("src/o.js", 0, 4, 4),
+            ("node_modules/p/index.js", 0, 2, 0),
+            ("src/a.js", 2, 4, 0)
+        ]
+    );
+    let value = serde_json::to_value(&report).unwrap();
+    assert_eq!(value["runs"][0]["totals"]["observedBytes"]["stddev"], 0.0);
+    let md = ci::markdown(&report);
+    assert!(
+        md.contains("## Run-to-run spread")
+            && md.contains("| scroll | 2 | 6 to 6 (mean 6.0, sd 0.0) |"),
+        "{md}"
+    );
+    // The same run number twice is an input error; a single run reports no spread.
+    f.write("dup", &fs::read_to_string(f.0.join("scroll-1")).unwrap());
+    assert!(
+        analyze_with_options(
+            &f.0,
+            &[f.0.join("scroll-1"), f.0.join("dup")],
+            &AnalyzeOptions::default()
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("run 1 of scenario \"scroll\" was already read")
+    );
+    assert!(
+        analyze_with_options(&f.0, &files[..1], &AnalyzeOptions::default())
+            .unwrap()
+            .runs
+            .is_empty()
+    );
+}
+
+#[test]
+fn diff_lists_scripts_and_ranges_that_only_one_recording_executed() {
+    let f = Fixture::new();
+    let source = "abcdefgh";
+    f.write("app.js", source);
+    f.map(&["src/a.js", "node_modules/p/index.js"]);
+    f.write("other.js", "wxyz");
+    f.write(
+        "other.js.map",
+        &json!({"version":3,"sources":["src/o.js"],"names":[],"mappings":"AAAA"}).to_string(),
+    );
+    let write = |name: &str, ranges: Value, other: bool| {
+        let mut scripts = vec![
+            json!({"path":"app.js","sha256":sha256(source.as_bytes()),"sourceMapSha256":sha256(&fs::read(f.0.join("app.js.map")).unwrap()),"functions":[{"isBlockCoverage":true,"ranges":ranges}]}),
+        ];
+        if other {
+            scripts.push(json!({"path":"other.js","sha256":sha256(b"wxyz"),"sourceMapSha256":sha256(&fs::read(f.0.join("other.js.map")).unwrap()),"functions":[{"isBlockCoverage":true,"ranges":[{"startOffset":0,"endOffset":4,"count":1}]}]}));
+        }
+        // Both recordings carry the same scenario name, as two runs of one setup would.
+        f.write(
+            name,
+            &json!({"schemaVersion":1,"scenario":"scroll","scripts":scripts}).to_string(),
+        );
+    };
+    write(
+        "a.json",
+        json!([{"startOffset":0,"endOffset":2,"count":1}]),
+        true,
+    );
+    write(
+        "b.json",
+        json!([{"startOffset":1,"endOffset":6,"count":1}]),
+        false,
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--dir", ".", "--diff", "a.json", "b.json", "--details"])
+        .args(["--json", "-", "--markdown", "summary.md"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["scenarios"], json!(["A", "B"]));
+    let diff = &report["recordingDiff"];
+    assert_eq!(diff["a"], "a.json");
+    assert_eq!(diff["onlyA"], json!([{"path": "other.js", "bytes": 4}]));
+    assert_eq!(diff["onlyB"], json!([]));
+    assert_eq!(
+        diff["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| (
+                s["source"].as_str().unwrap().to_owned(),
+                s["delta"]["observedBytes"].as_i64().unwrap(),
+                s["delta"]["unmeasuredBytes"].as_i64().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("src/o.js".to_owned(), -4, 4),
+            ("node_modules/p/index.js".to_owned(), 2, 0),
+            ("src/a.js".to_owned(), 1, 0)
+        ]
+    );
+    // Ranges are compared where both recorded the bundle; other.js is listed above instead.
+    assert_eq!(
+        diff["bundles"],
+        json!([{"path": "app.js", "onlyA": [{"start": 0, "end": 1, "source": "src/a.js"}], "onlyB": [{"start": 2, "end": 4, "source": "src/a.js"}, {"start": 4, "end": 6, "source": "node_modules/p/index.js"}]}])
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Scripts recorded only in A: other.js (4 bytes)")
+            && stderr.contains("3 sources executed differently")
+            && stderr.contains("          -4  src/o.js (A 4 of 4, B 0 of 4)"),
+        "{stderr}"
+    );
+    let md = fs::read_to_string(f.0.join("summary.md")).unwrap();
+    assert!(
+        md.contains("## Recording difference")
+            && md.contains("| src/o.js | &#91;application&#93; | 4 | 0 | -4 | +4 |"),
+        "{md}"
+    );
+    // Exactly two files, and not together with --coverage.
+    let bad = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args([
+            "--dir",
+            ".",
+            "--diff",
+            "a.json",
+            "b.json",
+            "--coverage",
+            "a.json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+}
+
+#[test]
+fn prefetch_evaluated_scripts_are_left_out_unless_a_mapped_function_ran() {
+    // A Turbopack chunk another route's prefetch loaded: its factories ran (module evaluation),
+    // and in one recording a component function inside a module did too.
+    let f = Fixture::new();
+    let source = "self.T=[1,(e,t,r)=>{t.exports={f:()=>0}},2,e=>{var a=e.i(1)}];";
+    f.write("app.js", source);
+    f.write(
+        "app.js.map",
+        &json!({"version":3,"sources":["heavy.js","next.js"],"names":[],"mappings":"oBAAA,aAAK,cCAL"})
+            .to_string(),
+    );
+    f.write("main.js", "ok()");
+    let range = |code: &str, count: u64| {
+        let start = source.find(code).unwrap();
+        json!({"startOffset":start,"endOffset":start + code.len(),"count":count})
+    };
+    let envelope = |name: &str, inner: u64| {
+        let functions = json!([
+            {"isBlockCoverage":true,"ranges":[{"startOffset":0,"endOffset":source.len(),"count":1}]},
+            {"isBlockCoverage":true,"ranges":[range("(e,t,r)=>{t.exports={f:()=>0}}", 1)]},
+            {"isBlockCoverage":true,"ranges":[range("()=>0", inner)]},
+            {"isBlockCoverage":true,"ranges":[range("e=>{var a=e.i(1)}", 1)]},
+        ]);
+        f.write(name, &json!({"schemaVersion":1,"scenario":name,"scripts":[
+            {"path":"app.js","sha256":sha256(source.as_bytes()),"sourceMapSha256":sha256(&fs::read(f.0.join("app.js.map")).unwrap()),"functions":functions},
+            {"path":"main.js","sha256":sha256(b"ok()"),"sourceMapSha256":null,"functions":[{"isBlockCoverage":true,"ranges":[{"startOffset":0,"endOffset":4,"count":1}]}]}
+        ],"prefetchEvaluatedScripts":[{"path":"app.js","url":"http://127.0.0.1/app.js","routes":["/about"]}]}).to_string())
+    };
+    let files = [envelope("initial", 0), envelope("navigate", 1)];
+    let report = analyze_with_options(&f.0, &files, &AnalyzeOptions::default()).unwrap();
+    let app = report.bundles.iter().find(|b| b.path == "app.js").unwrap();
+    // initial: left out, so app.js is unmeasured there; navigate: kept, its bytes observed.
+    let scenario = |name: &str| {
+        report
+            .scenario_reports
+            .iter()
+            .find(|s| s.scenario == name)
+            .unwrap()
+    };
+    let initial = scenario("initial")
+        .bundles
+        .iter()
+        .find(|b| b.path == "app.js")
+        .unwrap();
+    assert_eq!(
+        (
+            initial.counts.unmeasured_bytes,
+            initial.counts.observed_bytes
+        ),
+        (source.len(), 0)
+    );
+    assert_eq!(
+        scenario("initial").unmeasured_bundles[0].reason,
+        coldpath::UnmeasuredReason::PrefetchOnly
+    );
+    let navigate = scenario("navigate")
+        .bundles
+        .iter()
+        .find(|b| b.path == "app.js")
+        .unwrap();
+    assert!(navigate.counts.observed_bytes > 0 && navigate.counts.unmeasured_bytes == 0);
+    assert_eq!(
+        app.verification
+            .iter()
+            .map(|v| v.scenario.as_str())
+            .collect::<Vec<_>>(),
+        ["navigate"]
+    );
+    assert_eq!(
+        report.recording_warnings,
+        [
+            "initial: the analyzer left out 1 scripts that only router prefetches for other routes loaded and in which only module evaluation ran, so their bytes count as unmeasured: app.js (/about)",
+            "navigate: kept 1 scripts that only router prefetches for other routes loaded, because functions in them ran: app.js (/about)"
+        ]
+    );
+    // Left out in every scenario: unmeasured overall, with the prefetch reason.
+    let report = analyze_with_options(&f.0, &files[..1], &AnalyzeOptions::default()).unwrap();
+    assert_eq!(report.totals.unmeasured_bytes, source.len());
+    assert_eq!(report.unmeasured.bundles[0].scenarios, ["initial"]);
+    assert_eq!(report.unmeasured.prefetch_only_bytes, source.len());
+}

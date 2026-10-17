@@ -448,6 +448,22 @@ fn validate_map(map: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+/// Whether a source holds a bundler's generated code rather than a module: `[unmapped]`,
+/// webpack's loader-generated modules without a resource path (`webpack://_N_E/`,
+/// `webpack://_N_E/?6e28`), Turbopack's virtual roots other than `[project]`
+/// (`turbopack:///[next]/entry/page-loader.ts`), and Rollup's `\0` virtual modules.
+pub fn is_virtual(source: &str) -> bool {
+    if source == UNMAPPED || source.starts_with('\0') {
+        return true;
+    }
+    let path = match source.split_once("://") {
+        Some((_, rest)) => rest.split_once('/').map_or("", |(_, path)| path),
+        None => source,
+    };
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    path.is_empty() || (path.starts_with('[') && !path.starts_with("[project]/"))
+}
+
 /// The package of every source outside `node_modules`.
 pub const APPLICATION: &str = "[application]";
 
@@ -465,4 +481,32 @@ pub fn package(source: &str) -> String {
         return first.to_owned();
     }
     APPLICATION.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_virtual;
+
+    #[test]
+    fn virtual_sources_are_generated_code() {
+        for source in [
+            "[unmapped]",
+            "webpack://_N_E/",
+            "webpack://_N_E/?6e28",
+            "turbopack:///[next]/entry/page-loader.ts",
+            "[next]/entry/page.js",
+            "\0virtual:plugin",
+        ] {
+            assert!(is_virtual(source), "{source:?}");
+        }
+        for source in [
+            "src/a.js",
+            "../node_modules/pkg/index.js",
+            "webpack://_N_E/app/tags/View.jsx",
+            "turbopack:///[project]/pages/tags.jsx",
+            "turbopack:///[project]/node_modules/react/index.js",
+        ] {
+            assert!(!is_virtual(source), "{source:?}");
+        }
+    }
 }

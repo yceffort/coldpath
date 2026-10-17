@@ -489,17 +489,34 @@ fn initial_regression_budget_rejects_growth_and_missing_measurements() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("initial unobserved byte growth: +2"));
     assert!(run("2").status.success());
+    // A bundle the initial scenario never loads, such as another route's chunk, is unmeasured
+    // there. The budget still compares the measured part and names the unmeasured change (#62).
     fixture.write("unrecorded.js", "no evidence");
     let output = run("1000");
-    assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot check"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.0.join("pr.json")).unwrap()).unwrap();
+    assert_eq!(
+        report["scenarioReports"][0]["totals"]["unmeasuredBytes"],
+        11
+    );
     assert!(
-        report["budgetFailures"][0]
-            .as_str()
-            .unwrap()
-            .contains("unmeasured")
+        report["baseline"]["warnings"]
+            .to_string()
+            .contains("measurement coverage changed")
+    );
+    let output = run("1");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "initial unobserved byte growth: +2 exceeds budget 1 (unmeasured bytes changed by +11"
+        ),
+        "{stderr}"
     );
 }
 

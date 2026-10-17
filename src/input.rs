@@ -19,6 +19,8 @@ pub struct InputOptions {
     /// Directory that `file://` coverage URLs are relative to, when the analysis root
     /// has moved since capture (evidence replay). Defaults to the analysis root.
     pub file_url_root: Option<PathBuf>,
+    /// Scenario names by coverage file position, replacing the recorded ones (`--diff`).
+    pub scenario_names: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -30,12 +32,17 @@ pub enum Ranges {
 #[derive(Debug)]
 pub struct Observation {
     pub scenario: String,
+    /// The run of a repeated recording.
+    pub run: Option<u32>,
     pub format: &'static str,
     pub hash: Option<String>,
     pub source: Option<String>,
     // Some(None) means the capture explicitly had no map; None means unknown.
     pub map_hash: Option<Option<String>>,
     pub ranges: Ranges,
+    /// Routes whose prefetch responses alone loaded the script, when the collector saw its
+    /// modules evaluate and left the decision to the analyzer.
+    pub prefetch_routes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -239,6 +246,11 @@ pub struct Loaded {
     pub warnings: Vec<String>,
     /// What the collector reported about the page state behind each coldpath envelope.
     pub recording_warnings: Vec<String>,
+    /// Scripts the collector left out because only router prefetches loaded them, by
+    /// bundle path: the scenarios that left each one out.
+    pub prefetched: BTreeMap<String, Vec<String>>,
+    /// Run numbers of repeated recordings per scenario.
+    pub runs: BTreeMap<String, BTreeSet<u32>>,
 }
 
 pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Loaded> {
@@ -252,23 +264,37 @@ pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Lo
     let mut scenarios = Vec::new();
     let mut warnings = Vec::new();
     let mut recording = Vec::new();
-    for path in paths {
+    let mut prefetched: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut runs: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    for (position, path) in paths.iter().enumerate() {
         let value: serde_json::Value = serde_json::from_slice(
             &fs::read(path).with_context(|| format!("read coverage {}", path.display()))?,
         )
         .with_context(|| format!("read coverage {}", path.display()))?;
+        let renamed = options.scenario_names.get(position).cloned();
         if value.get("schemaVersion").is_some() {
-            let file: CoverageFile =
+            let mut file: CoverageFile =
                 serde_json::from_value(value).context("invalid coldpath coverage envelope")?;
             ensure!(
                 file.schema_version == 1,
                 "unsupported coverage schema version"
             );
+            if let Some(name) = renamed {
+                file.scenario = name;
+            }
             ensure!(
                 !file.scenario.trim().is_empty(),
                 "coverage scenario cannot be empty"
             );
             scenarios.push(file.scenario.clone());
+            if let Some(run) = file.run {
+                ensure!(
+                    runs.entry(file.scenario.clone()).or_default().insert(run),
+                    "{}: run {run} of scenario {:?} was already read from another file",
+                    path.display(),
+                    file.scenario
+                );
+            }
             if !file.blocked_origins.is_empty() {
                 recording.push(format!(
                     "{}: the collector aborted requests to {} because they are not --allow-origin or --cdn-prefix origins, so the recording shows the page without those responses",
@@ -296,6 +322,13 @@ pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Lo
                 ));
             }
             if !file.prefetched_scripts.is_empty() {
+                for script in &file.prefetched_scripts {
+                    coverage::validate_path(&script.path)?;
+                    let scenarios = prefetched.entry(script.path.clone()).or_default();
+                    if !scenarios.contains(&file.scenario) {
+                        scenarios.push(file.scenario.clone());
+                    }
+                }
                 let shown = file
                     .prefetched_scripts
                     .iter()
@@ -314,15 +347,23 @@ pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Lo
                     }
                 ));
             }
+            let mut evaluated: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for script in &file.prefetch_evaluated_scripts {
+                coverage::validate_path(&script.path)?;
+                evaluated.insert(script.path.clone(), script.routes.clone());
+            }
             for script in file.scripts {
                 coverage::validate_path(&script.path)?;
+                let prefetch_routes = evaluated.get(&script.path).cloned();
                 index.entry(script.path).or_default().push(Observation {
                     scenario: file.scenario.clone(),
+                    run: file.run,
                     format: "coldpath",
                     hash: Some(script.sha256),
                     source: None,
                     map_hash: Some(script.source_map_sha256),
                     ranges: Ranges::V8(script.functions),
+                    prefetch_routes,
                 });
             }
             continue;
@@ -337,11 +378,12 @@ pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Lo
                 path.display()
             );
         };
-        let scenario = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
+        let scenario = renamed.unwrap_or_else(|| {
+            path.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        });
         scenarios.push(scenario.clone());
         let mut matched = 0;
         for value in entries {
@@ -398,11 +440,13 @@ pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Lo
             matched += 1;
             index.entry(local).or_default().push(Observation {
                 scenario: scenario.clone(),
+                run: None,
                 format,
                 hash: None,
                 source: entry.source.or(entry.text),
                 map_hash: None,
                 ranges,
+                prefetch_routes: None,
             });
         }
         ensure!(
@@ -417,5 +461,7 @@ pub fn load(paths: &[PathBuf], root: &Path, options: &InputOptions) -> Result<Lo
         scenarios,
         warnings,
         recording_warnings: recording,
+        prefetched,
+        runs,
     })
 }

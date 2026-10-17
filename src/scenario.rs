@@ -114,6 +114,8 @@ pub struct ScenarioReport {
     /// Sources with bytes executed here but not observed in the initial scenario.
     /// Missing initial recordings are reported separately, never treated as zero use.
     pub interaction_candidates: Vec<InteractionCandidate>,
+    /// Bundles this scenario did not record, largest first, with the reason.
+    pub unmeasured_bundles: Vec<crate::UnmeasuredBundle>,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,12 +152,15 @@ impl Accumulator {
                 sources: Vec::new(),
                 packages: Vec::new(),
                 interaction_candidates: Vec::new(),
+                unmeasured_bundles: Vec::new(),
             },
             sources: BTreeMap::new(),
             candidates: BTreeMap::new(),
         }
     }
 
+    /// `prefetched` lists the scenarios whose recording left this bundle out after router prefetches.
+    #[allow(clippy::too_many_arguments)]
     pub fn bundle(
         &mut self,
         path: &str,
@@ -164,8 +169,28 @@ impl Accumulator {
         used: &BTreeMap<String, Vec<Interval>>,
         initial: Option<&str>,
         content: Option<&[u8]>,
+        prefetched: Option<&[String]>,
     ) -> Result<()> {
         let observed = used.get(&self.report.scenario);
+        if observed.is_none() {
+            let prefetched = prefetched.is_some_and(|s| s.contains(&self.report.scenario));
+            self.report
+                .unmeasured_bundles
+                .push(crate::UnmeasuredBundle {
+                    path: path.into(),
+                    bytes: segments.iter().map(|s| s.end - s.start).sum(),
+                    reason: if prefetched {
+                        crate::UnmeasuredReason::PrefetchOnly
+                    } else {
+                        crate::UnmeasuredReason::NotRecorded
+                    },
+                    scenarios: if prefetched {
+                        vec![self.report.scenario.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                });
+        }
         let mut cursor = 0;
         let mut extra_cursor = 0;
         let initial_used = initial.and_then(|name| used.get(name));
@@ -249,6 +274,7 @@ impl Accumulator {
 
     pub fn finish(mut self) -> ScenarioReport {
         (self.report.sources, self.report.packages) = crate::aggregate_sources(self.sources);
+        crate::sort_unmeasured(&mut self.report.unmeasured_bundles);
         self.report.interaction_candidates = self.candidates.into_values().collect();
         self.report.interaction_candidates.sort_by(|a, b| {
             b.interaction_only_bytes
