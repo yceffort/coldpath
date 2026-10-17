@@ -243,6 +243,30 @@ try {
   await page.getByRole('button', {name: 'src', exact: true}).click()
   assert.equal(await page.locator(top).count(), 2)
 
+  // Two pnpm copies of one package shorten to the same path, but each keeps its own tile, named by its version.
+  const pnpm = join(output, 'pnpm')
+  await mkdir(pnpm, {recursive: true})
+  await writeFile(join(pnpm, 'vendor.js'), ';'.repeat(40))
+  await writeFile(
+    join(pnpm, 'vendor.js.map'),
+    JSON.stringify({
+      version: 3,
+      sections: ['tslib@1.14.1', 'tslib@2.6.2'].map((store, i) => ({
+        offset: {line: 0, column: i * 30},
+        map: {version: 3, sources: [`node_modules/.pnpm/${store}/node_modules/tslib/tslib.js`], names: [], mappings: 'AAAA'},
+      })),
+    }),
+  )
+  const pnpmHtml = join(output, 'pnpm.html')
+  execFileSync(binary, ['--dir', pnpm, '--treemap', pnpmHtml], {stdio: 'pipe'})
+  await page.goto(pathToFileURL(pnpmHtml).href)
+  await page.getByRole('button', {name: 'vendor.js', exact: true}).click()
+  await page.getByRole('button', {name: 'node_modules/tslib', exact: true}).click()
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => [tile.ariaLabel, tile.dataset.bytes])), [
+    ['tslib.js (tslib@1.14.1), 30 bytes', '30'],
+    ['tslib.js (tslib@2.6.2), 10 bytes', '10'],
+  ])
+
   // One source shipped in two bundles: JSON counts the copies, and the treemap lists the extra bytes.
   const shared = join(output, 'shared')
   await mkdir(shared, {recursive: true})

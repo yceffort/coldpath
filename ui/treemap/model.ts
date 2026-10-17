@@ -89,7 +89,8 @@ export function build(report: Report, {group, scenario, initial}: {group: string
       let parent = node
       for (let i = 0; i < parts.length; i++) {
         const leaf = i === parts.length - 1,
-          key = (leaf ? 'file:' : 'folder:') + parts[i]
+          // A leaf is keyed by its full source, so that two sources with the same shortened path keep a tile each.
+          key = leaf ? 'file:' + source.source : 'folder:' + parts[i]
         if (!parent.children.has(key))
           parent.children.set(
             key,
@@ -147,6 +148,24 @@ export function build(report: Report, {group, scenario, initial}: {group: string
     }
   }
   total(root)
+  // Files that would show the same name, such as pnpm copies of one package at two versions, are told apart by the path
+  // segment where their full sources first differ.
+  const distinguish = (node: TreeNode) => {
+    const named = new Map<string, TreeNode[]>()
+    for (const child of node.children.values()) {
+      if (child.kind !== 'file') distinguish(child)
+      else if (named.has(child.name)) named.get(child.name)!.push(child)
+      else named.set(child.name, [child])
+    }
+    for (const same of named.values()) {
+      if (same.length < 2) continue
+      const paths = same.map((file) => file.source!.split('/'))
+      let i = 0
+      while (paths.every((path) => path[i] === paths[0][i])) i++
+      same.forEach((file, j) => (file.name += ' (' + (paths[j][i] || file.source) + ')'))
+    }
+  }
+  distinguish(root)
   return {root, changes}
 }
 
