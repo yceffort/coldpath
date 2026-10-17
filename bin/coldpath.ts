@@ -13,7 +13,7 @@ import {snapshot} from '../lib/snapshot.ts'
 import type {Network} from '../lib/collect.ts'
 
 const usage = `Usage:
-  coldpath collect --scenarios coldpath.scenarios.json
+  coldpath collect --scenarios coldpath.scenarios.json [COLLECT OPTIONS...]
   coldpath collect --url URL --dir DIRECTORY --out FILE [COLLECT OPTIONS...]
   coldpath profile --scenarios coldpath.scenarios.json [--runs N]
   coldpath graph --format esbuild|webpack|turbopack --input FILE --root BUILD_ROOT --out graph.json [--environment client|server|all]
@@ -33,12 +33,14 @@ const browserOptions = `  --browser-channel NAME     Installed browser by Playwr
 
 const help: Record<string, string> = {
   collect: `Usage:
-  coldpath collect --scenarios coldpath.scenarios.json
+  coldpath collect --scenarios coldpath.scenarios.json [OPTIONS...]
   coldpath collect --url URL --dir DIRECTORY --out FILE [OPTIONS...]
 
 Records V8 coverage of one browser scenario with Playwright's Chromium (docs/collecting.md).
 
-  --scenarios FILE           Collect every scenario of a scenario file, in order
+  --scenarios FILE           Collect every scenario of a scenario file, in order; options other than
+                             --url, --dir, --out, --scenario and --actions override the file's values,
+                             and a repeatable option replaces the file's list
   --url URL                  Page to open
   --dir DIRECTORY            Build output the served scripts must match
   --out FILE                 Coverage file to write
@@ -157,11 +159,6 @@ async function main() {
     })
     const number = (key: 'wait-ms' | 'repeat' | 'device-scale-factor' | 'cpu-slowdown' | 'latency-ms' | 'download-kbps' | 'upload-kbps') =>
       values[key] === undefined ? undefined : Number(values[key])
-    if (values.scenarios) {
-      const {scenarios} = await loadScenarios(values.scenarios)
-      for (const scenario of scenarios) await collect({...scenario, repeat: number('repeat') ?? scenario.repeat})
-      return 0
-    }
     let viewport
     if (values.viewport) {
       const match = /^(\d+)x(\d+)$/.exec(values.viewport)
@@ -175,7 +172,7 @@ async function main() {
       if (!match) throw new Error(`--header must be 'NAME: VALUE': ${header}`)
       extraHTTPHeaders = {...extraHTTPHeaders, [match[1]]: match[2]}
     }
-    await collect({
+    const options = {
       url: values.url,
       dir: values.dir,
       out: values.out,
@@ -202,7 +199,17 @@ async function main() {
       allowPageErrors: values['allow-page-error'],
       browserPath: values['browser-path'],
       browserChannel: values['browser-channel'],
-    })
+    }
+    if (values.scenarios) {
+      if ((['url', 'dir', 'out', 'scenario', 'actions'] as const).some((key) => values[key] !== undefined))
+        throw new Error('--scenarios does not take --url/--dir/--out/--scenario/--actions')
+      // The options given on the command line override each scenario's values.
+      const overrides = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined))
+      const {scenarios} = await loadScenarios(values.scenarios)
+      for (const scenario of scenarios) await collect({...scenario, ...overrides})
+      return 0
+    }
+    await collect(options)
     return 0
   }
   if (command === 'profile') {

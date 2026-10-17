@@ -150,6 +150,28 @@ try {
     [],
   )
   assert.equal(JSON.parse(await readFile(repeated, 'utf8')).run, undefined)
+  // Command-line options override the scenario file; the options that name the scenario's page and files conflict with it.
+  const overrideFile = join(artifacts, 'override.scenarios.json')
+  await writeFile(
+    overrideFile,
+    JSON.stringify({
+      url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`,
+      dir: fixture,
+      prefix: '/assets/',
+      out: '.',
+      waitMs: 1000,
+      scenarios: [{name: 'override'}],
+    }),
+  )
+  await run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'collect', '--scenarios', overrideFile, '--wait-ms', '0'])
+  assert.match(
+    JSON.parse(await readFile(join(artifacts, 'override.coverage.json'), 'utf8')).environment.observation,
+    /^navigation networkidle \+ 0ms;/,
+  )
+  await assert.rejects(
+    run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'collect', '--scenarios', overrideFile, '--out', 'x.json']),
+    /--scenarios does not take --url\/--dir\/--out\/--scenario\/--actions/,
+  )
 
   const siteCollect = async (name: string) => {
     const output = join(artifacts, `${name}.coverage.json`)
