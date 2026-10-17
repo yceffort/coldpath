@@ -216,15 +216,25 @@ export async function label({
 
   const sources: Record<string, unknown> = {}
   let rejected = 0,
-    failed = 0
+    failed = 0,
+    stop = false
   const queue = [...targets]
   await Promise.all(
     Array.from({length: concurrency}, async () => {
-      for (let row; (row = queue.shift());) {
+      // After a failed request (a rate limit, for example), requests already sent finish but no new ones start.
+      for (let row; !stop && (row = queue.shift());) {
         const copies = contents.get(row.source)!,
           code = copies[0]
         const task = mode === 'describe' ? 'describe' : row.source.startsWith('webpack://inferred/chunk/') ? 'chunk' : 'identify'
-        const answer = await ask(JSON.stringify({source: row.source, bytes: row.bytes, ...digest(code)}), task)
+        let answer
+        try {
+          answer = await ask(JSON.stringify({source: row.source, bytes: row.bytes, ...digest(code)}), task)
+        } catch (error) {
+          failed++
+          stop = true
+          console.error(`${row.source}: ${(error as Error).message}`)
+          continue
+        }
         if (!answer) {
           failed++
           console.error(`${row.source}: no valid answer`)
@@ -273,4 +283,5 @@ export async function label({
     `Labeled ${Object.keys(sources).length}/${targets.length} sources (${rejected} identity guesses rejected, ${failed} failed); ` +
       `tokens in ${usage.input}, out ${usage.output} -> ${out}`,
   )
+  if (stop) throw new Error('stopped after a failed request; the remaining sources were not labeled')
 }

@@ -150,7 +150,7 @@ Providers:
 | `anthropic` (default, model `claude-haiku-4-5`) | Anthropic Messages API with a JSON schema output format | the Anthropic SDK's usual sources, for example `ANTHROPIC_API_KEY`; requires `@anthropic-ai/sdk` |
 | `openai` | any OpenAI-compatible `POST {--base-url}/chat/completions` with a strict JSON schema `response_format` (OpenAI by default; also local servers such as Ollama or LM Studio) | `COLDPATH_LABEL_API_KEY` or `OPENAI_API_KEY` as a bearer token, if set |
 
-`--model` is required for `openai`. Servers that do not honor strict JSON schemas may return answers that fail validation; those sources are reported and skipped. The command prints token usage.
+`--model` is required for `openai`. Servers that do not honor strict JSON schemas may return answers that fail validation; those sources are reported and skipped. A request that fails, for example with a rate limit or a context-length error, stops the command: requests already sent finish, no new ones start, the answers received so far are written to `labels.json`, and the command exits with status 1. The command prints token usage.
 
 ## Report fields
 

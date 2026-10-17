@@ -384,6 +384,61 @@ try {
   assert(Object.values<object>(described.sources).every((row) => Object.keys(row).join() === 'summary'))
   assert(requests.some((row) => row.url === '/v1/messages'))
 
+  // The first request is rate limited. Later answers are held back, so a worker that kept going would send its next request after them.
+  const limited: string[] = []
+  let answered = false,
+    late = 0
+  const limiter = createServer((request, response) => {
+    let body = ''
+    request.on('data', (chunk) => (body += chunk))
+    request.on('end', () => {
+      const content = JSON.parse(body).messages[1].content
+      if (answered) late++
+      limited.push(JSON.parse(content).source)
+      if (limited.length === 1) return response.writeHead(429).end('{"error":"rate limited"}')
+      setTimeout(() => {
+        answered = true
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({choices: [{message: {content: JSON.stringify(answer(content))}}]}))
+      }, 300)
+    })
+  })
+  await new Promise<void>((resolve) => limiter.listen(0, '127.0.0.1', resolve))
+  try {
+    await assert.rejects(
+      run(
+        process.execPath,
+        [
+          join(root, 'bin', 'coldpath.ts'),
+          'label',
+          '--report',
+          join(out, 'report.json'),
+          '--out',
+          join(out, 'limited.json'),
+          '--provider',
+          'openai',
+          '--model',
+          'test-model',
+          '--base-url',
+          `http://127.0.0.1:${(limiter.address() as AddressInfo).port}/v1`,
+        ],
+        {env},
+      ),
+      (error: {code: number; stdout: string; stderr: string}) => {
+        assert.equal(error.code, 1)
+        assert.match(error.stderr, /: 429 \{"error":"rate limited"\}/)
+        assert.match(error.stdout, /, 1 failed\)/, 'the summary counts the failed request')
+        return true
+      },
+    )
+    const partial = Object.keys(JSON.parse(await readFile(join(out, 'limited.json'), 'utf8')).sources)
+    assert(partial.length, 'answers received before the failure are written')
+    assert.deepEqual(partial.sort(), limited.slice(1).sort())
+    assert.equal(late, 0, 'no request starts after the failure')
+  } finally {
+    limiter.close()
+  }
+
   await analyze('--labels', join(out, 'labels.json'), '--json', join(out, 'labeled.json'), '--treemap', join(out, 'labeled.html'))
   const labeled = JSON.parse(await readFile(join(out, 'labeled.json'), 'utf8'))
   assert.equal(labeled.totals.bytes, report.totals.bytes)
