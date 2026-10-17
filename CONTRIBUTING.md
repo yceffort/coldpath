@@ -54,7 +54,7 @@ Preserve the distinction between unobserved and unmeasured code, source verifica
 
 ## Scope
 
-The project analyzes generated JavaScript bytes. It does not currently produce Istanbul/LCOV test reports, attribute style, layout, or paint time to sources, analyze CSS ([feasibility decision](docs/css-coverage.md)) or automatically remove code. Import-path explanations require a bundler graph or esbuild metafile; source maps alone do not provide an import graph. A [local comparison](benchmarks/RESULTS.md) covers one build and explicit report workflows. There is no supported prebuilt-binary release process yet.
+The project analyzes generated JavaScript bytes. It does not currently produce Istanbul/LCOV test reports, attribute style, layout, or paint time to sources, analyze CSS ([feasibility decision](docs/css-coverage.md)) or automatically remove code. Import-path explanations require a bundler graph or esbuild metafile; source maps alone do not provide an import graph. A [local comparison](benchmarks/RESULTS.md) covers one build and explicit report workflows.
 
 Changes to the CLI or JSON schema should update the usage guide. Contributions are distributed under the project's MIT license.
 

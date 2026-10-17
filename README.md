@@ -49,7 +49,7 @@ The analyzer is not published to crates.io. Node.js is only needed for collectio
 
 ```sh
 coldpath collect --scenarios coldpath.scenarios.json
-coldpath analyze --scenarios coldpath.scenarios.json --graph dist/assets/coldpath.graph.json --treemap artifacts/actions.html
+coldpath analyze --scenarios coldpath.scenarios.json --graph dist/coldpath.graph.json --treemap artifacts/actions.html
 ```
 
 `coldpath analyze` (or `coldpath` with analyzer options) runs the Rust analyzer from `COLDPATH_ANALYZER`, the installed `@yceffort/coldpath-<platform>-<arch>` package, or the native `coldpath` binary on `PATH` (the npm wrapper skips itself), in that order. See [collecting coverage](docs/collecting.md#scenario-files) for the scenario file.
@@ -302,7 +302,7 @@ coldpath --dir dist \
   --markdown artifacts/summary.md
 ```
 
-Exit codes: `0` success, `1` input/analysis error, `2` budget exceeded. Argument syntax errors also use `2` (clap). Reports are written before budget failure. [Configuration](docs/usage.md#filters-compression-and-budgets) also supports observed-scenario coverage budgets and gzip/Brotli budgets.
+Exit codes: `0` success, `1` input/analysis error, `2` budget exceeded. Argument syntax errors also use `2` (clap). `--replay` also exits `3` when the current analyzer differs from the recorded one and `4` when an excerpt reproduced only its selected bundles ([replay](docs/usage.md#evidence-export-and-replay)). Reports are written before budget failure. [Configuration](docs/usage.md#filters-compression-and-budgets) also supports observed-scenario coverage budgets and gzip/Brotli budgets.
 
 Compare a PR build against a saved report from main:
 

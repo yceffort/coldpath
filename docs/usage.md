@@ -1,6 +1,6 @@
 # Usage guide
 
-Run `coldpath --help` for the complete CLI. All paths in the examples are relative to your current working directory.
+Run `coldpath --help` for the complete CLI and `coldpath --version` for the analyzer's version. All paths in the examples are relative to your current working directory.
 
 ## Files, globs, and output
 
@@ -296,7 +296,7 @@ Store reusable settings with `--config ci.json`:
 
 CLI include/exclude lists are appended; CLI byte budgets override matching config values, `--max-added-package-bytes` entries override the same package's config entry, `--fail-on-new-package` turns the check on, and `--allow-new-package` names are added to the config's list. gzip/Brotli budgets are configured in JSON and automatically enable compression. `maxInitialBytes` needs `--initial-html`. The `maxAdded...` budgets and `failOnNewPackages` compare against `--baseline`; without one they are not checked and a warning says so, so one config serves the run that generates the baseline and the run that compares with it. Unknown keys fail. Input/output paths and URL mappings are CLI options.
 
-Success exits `0`; input or analysis failure exits `1`; budget failure exits `2` after reports are written. Malformed CLI arguments also exit `2` through clap. `maxUnobservedBytes` fails with exit `2` if no selected bytes have coverage, including absent, empty, or entirely unselected recordings. A measured recording with zero execution is valid and all of its bytes are unobserved. For partially measured builds, combine `maxUnobservedBytes` with `maxUnmeasuredBytes`: recording less code must not appear to improve unused-byte results. A budget that cannot be evaluated, such as `maxInitialBytes` without `--initial-html` or `maxAddedInitialBytes` against a baseline without an initial load, is listed in `budgetFailures` with `cannot check budget` and exits `2` like an exceeded one. Markdown output is a local file and does not post comments to any service.
+Success exits `0`; input or analysis failure exits `1`; budget failure exits `2` after reports are written. Malformed CLI arguments also exit `2` through clap. `maxUnobservedBytes` (`--max-unobserved-bytes`) fails with exit `2` if no selected bytes have coverage, including absent, empty, or entirely unselected recordings. A measured recording with zero execution is valid and all of its bytes are unobserved. For partially measured builds, combine `maxUnobservedBytes` with `maxUnmeasuredBytes` (`--max-unmeasured-bytes`): recording less code must not appear to improve unused-byte results. A budget that cannot be evaluated, such as `maxInitialBytes` without `--initial-html` or `maxAddedInitialBytes` against a baseline without an initial load, is listed in `budgetFailures` with `cannot check budget` and exits `2` like an exceeded one. Markdown output is a local file and does not post comments to any service.
 
 ## Import paths
 

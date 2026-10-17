@@ -110,7 +110,8 @@
           "unmeasuredBytes": 0
         }
       ],
-      "interactionCandidates": []
+      "interactionCandidates": [],
+      "unmeasuredBundles": []
     },
     {
       "scenario": "interaction-delta",
@@ -224,7 +225,8 @@
             "brotliBytes": 35
           }
         }
-      ]
+      ],
+      "unmeasuredBundles": []
     }
   ],
   "baseline": null,
@@ -233,6 +235,7 @@
     {
       "kind": "inspect-imports",
       "source": "../../fixtures/feature.js",
+      "package": "[application]",
       "scenario": "interaction-delta",
       "bytes": 31,
       "estimatedCompression": {
@@ -246,6 +249,7 @@
     }
   ],
   "warnings": [],
+  "recordingWarnings": [],
   "excludedBundles": [],
   "budgetFailures": [],
   "compression": null,

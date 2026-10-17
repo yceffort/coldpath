@@ -147,6 +147,7 @@ struct Args {
     /// Print the import chain and available locations for a graph input or report source.
     #[arg(long)]
     why: Option<String>,
+    /// Rows to print per list in the terminal summary.
     #[arg(long, default_value_t = 20)]
     limit: usize,
     /// Aggregate sources under the shortest leading path a glob matches, such as

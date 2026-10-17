@@ -93,7 +93,7 @@ export default {
 }
 ```
 
-The build emits `coldpath.graph.json` next to output chunks. Vite supplies its configured project root automatically. Pass that asset to `--graph`. Optional `fileName` changes its output name. The plugin uses [Rollup module information and resolution hooks](https://rollupjs.org/plugin-development/); the real-build corpus also exercises Vite 8's Rolldown implementation.
+The build emits `coldpath.graph.json` at the top of the output directory, such as `dist/coldpath.graph.json` for Vite, which puts chunks in `dist/assets/`. Vite supplies its configured project root automatically. Pass that asset to `--graph`. Optional `fileName` changes its output name. The plugin uses [Rollup module information and resolution hooks](https://rollupjs.org/plugin-development/); the real-build corpus also exercises Vite 8's Rolldown implementation.
 
 Locations tagged `plugin-input` refer to the text seen by this plugin. Earlier transforms can affect them. Literal imports/reexports and `require()` are parsed, and TypeScript's `import x = require()` is recorded like a top-level `require()` call; computed dynamic expressions remain without a location when they cannot be resolved exactly. Type-only imports are excluded. JavaScript and `.tsx` files are parsed with JSX, while `.ts`, `.mts`, and `.cts` files are not, so an angle-bracket type assertion such as `<number>a` does not stop the parse.
 
