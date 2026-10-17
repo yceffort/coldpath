@@ -1936,6 +1936,59 @@ fn explicit_selection_rejects_symlinks_outside_the_analysis_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn directory_scan_warns_about_symlinks_and_keeps_real_paths() {
+    let fixture = Fixture::new();
+    let root = fixture.0.join("dist");
+    fs::create_dir_all(root.join("v2")).unwrap();
+    fs::create_dir(fixture.0.join("shared")).unwrap();
+    fixture.write("dist/main.js", "main;");
+    fixture.write("dist/v2/app.js", "app;");
+    fixture.write("shared/vendor.js", "vendor;");
+    let links = [
+        ("latest", "v2"),
+        ("alias.js", "main.js"),
+        ("vendor", "../shared"),
+        ("broken.js", "missing.js"),
+    ];
+    for (link, target) in links {
+        std::os::unix::fs::symlink(target, root.join(link)).unwrap();
+    }
+    // A link to a file with another extension cannot be a bundle.
+    std::os::unix::fs::symlink("main.js", root.join("notes.txt")).unwrap();
+    let report = analyze(&root, &[]).unwrap();
+    assert_eq!(
+        report
+            .bundles
+            .iter()
+            .map(|b| (b.path.as_str(), b.counts.bytes))
+            .collect::<Vec<_>>(),
+        vec![("main.js", 5), ("v2/app.js", 4)]
+    );
+    let mut expected = links
+        .iter()
+        .map(|(link, target)| {
+            format!(
+                "skipped symlink {} -> {target}: coldpath scans only real files and directories inside the analysis root, so coverage must use the real path",
+                root.join(link).display()
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for bundle in ["main.js", "v2/app.js"] {
+        expected.insert(format!(
+            "{bundle}: no source map; entire source is unmapped"
+        ));
+    }
+    assert_eq!(
+        report
+            .warnings
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected
+    );
+}
+
 #[test]
 fn compact_treemap_has_no_code_payload_and_escapes_source_paths() {
     let fixture = Fixture::new();

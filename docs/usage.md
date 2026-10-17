@@ -24,7 +24,7 @@ TSV aggregates contributions by original source across selected bundles. Columns
 
 ## Source maps
 
-`--dir` without file/glob inputs recursively scans `.js`, `.mjs`, and `.cjs` files. The analyzer reads a final standalone `//# sourceMappingURL=...`, `//@ sourceMappingURL=...`, or `/*# sourceMappingURL=... */` comment, falling back to an adjacent `filename.js.map` when there is no reference. The map's filename does not need to match the JavaScript filename.
+`--dir` without file/glob inputs recursively scans `.js`, `.mjs`, and `.cjs` files. Symlinks are not followed: bundles must stay inside the root after resolving links, and a link to a file or directory inside the root would only count the same bytes twice under a second name. A link named like a JavaScript file, a link to a directory, and a link whose target is missing are skipped with a warning that names the target; use the real path in coverage. Links to other files are skipped without a warning. The analyzer reads a final standalone `//# sourceMappingURL=...`, `//@ sourceMappingURL=...`, or `/*# sourceMappingURL=... */` comment, falling back to an adjacent `filename.js.map` when there is no reference. The map's filename does not need to match the JavaScript filename.
 
 Supported map inputs include ordinary v3 maps, indexed maps with embedded sections, and base64 or percent-encoded `data:application/json` maps. `sourcesContent` is optional. Explicit overrides take precedence over comments:
 

@@ -592,19 +592,31 @@ pub fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn javascript_files(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
+/// Symlinks are not followed: one inside the root only aliases a real file or directory, so its
+/// bytes would count twice. A link that could hide a bundle is skipped with a warning.
+fn javascript_files(
+    dir: &Path,
+    paths: &mut Vec<PathBuf>,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
         let entry = entry?;
         let kind = entry.file_type()?;
+        let javascript = matches!(
+            entry.path().extension().and_then(|ext| ext.to_str()),
+            Some("js" | "mjs" | "cjs")
+        );
         if kind.is_dir() {
-            javascript_files(&entry.path(), paths)?;
-        } else if kind.is_file()
-            && matches!(
-                entry.path().extension().and_then(|ext| ext.to_str()),
-                Some("js" | "mjs" | "cjs")
-            )
-        {
+            javascript_files(&entry.path(), paths, warnings)?;
+        } else if kind.is_file() && javascript {
             paths.push(entry.path());
+        } else if kind.is_symlink() && (javascript || !entry.path().is_file()) {
+            // Named like a bundle, or pointing at a directory or at nothing.
+            warnings.push(format!(
+                "skipped symlink {} -> {}: coldpath scans only real files and directories inside the analysis root, so coverage must use the real path",
+                entry.path().display(),
+                fs::read_link(entry.path())?.display()
+            ));
         }
     }
     Ok(())
@@ -629,7 +641,7 @@ pub fn analyze_with_options(
     let input::Loaded {
         index: mut coverage,
         mut scenarios,
-        warnings,
+        mut warnings,
         recording_warnings,
         mut prefetched,
         runs,
@@ -692,7 +704,7 @@ pub fn analyze_with_options(
             files.push(file);
         }
     } else {
-        javascript_files(dir, &mut files)?;
+        javascript_files(dir, &mut files, &mut warnings)?;
     }
     files.sort();
     files.dedup();
