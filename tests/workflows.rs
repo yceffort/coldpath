@@ -831,6 +831,24 @@ fn evidence_replays_offline_after_the_workspace_is_gone() {
         String::from_utf8_lossy(&grouped.stderr)
     );
     assert!(String::from_utf8_lossy(&grouped.stdout).contains("Group"));
+    // Budgets against a baseline and --why do not affect a replay, so they are rejected, not
+    // dropped, and the error names the ones given.
+    for (extra, named) in [
+        (
+            &["--baseline", "x.json", "--max-added-bytes", "1"][..],
+            "--baseline, --max-added-bytes",
+        ),
+        (&["--why", "x"][..], "--why"),
+    ] {
+        let rejected = run(&offline, &[&["--replay", "evidence"][..], extra].concat());
+        assert_eq!(rejected.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&rejected.stderr),
+            format!(
+                "Error: --replay takes only output options (--json, --html, --treemap, --tsv, --markdown, --details, --limit, --group-by), not {named}\n"
+            )
+        );
+    }
 
     fs::write(evidence.join("tree/maps/app.map"), "{}").unwrap();
     let changed = run(&offline, &["--replay", "evidence"]);

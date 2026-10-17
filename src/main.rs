@@ -242,6 +242,34 @@ fn replay_args(cli: &Args, dir: &Path) -> Result<(Args, coldpath::evidence::Mani
         cli.analysis()? == bare.analysis()?,
         "--replay takes only output options (--json, --html, --treemap, --tsv, --markdown, --details, --limit, --group-by)"
     );
+    // analysis() leaves these out, so the check above does not see them.
+    let given = [
+        ("--baseline", cli.baseline.is_some()),
+        ("--max-added-bytes", cli.max_added_bytes.is_some()),
+        (
+            "--max-added-unobserved-bytes",
+            cli.max_added_unobserved_bytes.is_some(),
+        ),
+        (
+            "--max-added-initial-bytes",
+            cli.max_added_initial_bytes.is_some(),
+        ),
+        (
+            "--max-added-package-bytes",
+            !cli.max_added_package_bytes.is_empty(),
+        ),
+        ("--fail-on-new-package", cli.fail_on_new_package),
+        ("--allow-new-package", !cli.allow_new_package.is_empty()),
+        ("--why", cli.why.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(option, given)| given.then_some(option))
+    .collect::<Vec<_>>();
+    ensure!(
+        given.is_empty(),
+        "--replay takes only output options (--json, --html, --treemap, --tsv, --markdown, --details, --limit, --group-by), not {}",
+        given.join(", ")
+    );
     let manifest = coldpath::evidence::open(dir)?;
     let mut args: Args = serde_json::from_value(manifest.invocation.clone())
         .context("invalid evidence invocation")?;
