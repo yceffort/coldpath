@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises'
 import {dirname, join, resolve} from 'node:path'
 import type {CaptureOptions} from './collect.ts'
 
-export type Scenario = CaptureOptions & {scenario: string; out: string; profileOut: string}
+export type Scenario = CaptureOptions & {scenario: string; out: string; profileOut: string; repeat?: number}
 
 // Paths in the file are relative to the file; scenario URLs resolve against `url`.
 export async function loadScenarios(file: string): Promise<{dir: string; scenarios: Scenario[]}> {
@@ -47,6 +47,7 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
       dir: resolve(base, config.dir),
       prefix: scenario.prefix ?? config.prefix,
       waitMs: scenario.waitMs ?? config.waitMs,
+      repeat: option('repeat'),
       scenario: scenario.name,
       actions: scenario.actions && resolve(base, scenario.actions),
       out: join(out, `${scenario.name}.coverage.json`),

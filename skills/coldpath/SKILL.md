@@ -123,7 +123,7 @@ export default async function ({page}) {
 
 Bytes are generated, uncompressed UTF-8, not original source size or transfer size. Compression figures from `--source-compression` are isolated estimates, not guaranteed savings.
 
-If `analyze` prints `recording warning:` (Markdown: a warning above the totals), the collector aborted requests, tolerated page errors, or left out scripts that only Next.js router prefetches for other routes loaded (their bytes count as unmeasured) in that scenario. Say so before any number from it: the numbers describe the page as recorded.
+If `analyze` prints `recording warning:` (Markdown: a warning above the totals), the collector aborted requests, tolerated page errors, or left out scripts that only Next.js router prefetches for other routes loaded (their bytes count as unmeasured; the analyzer does the same for webpack and Pages Router chunks in which only module evaluation ran) in that scenario. Say so before any number from it: the numbers describe the page as recorded. The "Unmeasured bytes" section lists which bundles are unmeasured and why; `[unmapped]` is a different thing, bytes no source map attributes, and the Markdown says how much of it comes from bundles without a map.
 
 Review actions (`recommendations` in JSON, "Review actions" in Markdown):
 
@@ -196,7 +196,9 @@ In CI, build and profile both the base and the pull request in one job. The GitH
 
 ## CI budgets
 
-Budget flags: `--max-bytes`, `--max-unobserved-bytes`, `--max-unmeasured-bytes`, and with `--baseline`, `--max-added-bytes`, `--max-added-unobserved-bytes`. Exit codes: `0` ok, `1` input or analysis error, `2` budget exceeded (reports are still written) **or** invalid CLI arguments. Check stderr for `budget failed:` before calling it a budget failure. For pull requests, the repository ships a GitHub Action (`uses: yceffort/coldpath@<tag>`) that compares against the base branch and keeps one PR comment; see the README's GitHub Action section.
+Budget flags: `--max-bytes`, `--max-unobserved-bytes`, `--max-unmeasured-bytes`, `--max-initial-bytes` (with `--initial-html FILE`, a prerendered document of the build whose named bundles are the initial load, found without a browser), and with `--baseline`, `--max-added-bytes`, `--max-added-unobserved-bytes`, `--max-added-initial-bytes`, `--max-added-package-bytes NAME=BYTES`, and `--fail-on-new-package` (with `--allow-new-package NAME`), which single out a dependency entering the bundle. A baseline must be made in the same mode (with coverage, or without) as the run that compares with it; a `--dir`-only baseline against a `--scenarios` run is rejected. Exit codes: `0` ok, `1` input or analysis error, `2` budget exceeded (reports are still written) **or** invalid CLI arguments. Check stderr for `budget failed:` before calling it a budget failure. For pull requests, the repository ships a GitHub Action (`uses: yceffort/coldpath@<tag>`) that compares against the base branch and keeps one PR comment; see the README's GitHub Action section.
+
+When the numbers of two runs differ and the user asks why, record the scenario several times (`"repeat": 5` in the scenario file, or `collect --repeat 5`) and read the "Run-to-run spread" section the Markdown then has, or compare two particular recordings with `coldpath --dir DIR --diff a.coverage.json b.coverage.json --markdown diff.md`, which lists the scripts only one of them loaded and the sources that executed differently. The envelope's `consoleMessages` and `failedRequests` say what went wrong in each run.
 
 ## Troubleshooting
 

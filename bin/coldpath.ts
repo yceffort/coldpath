@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises'
 import {dirname, resolve} from 'node:path'
 import {parseArgs} from 'node:util'
 import {runAnalyzer} from '../lib/analyzer.ts'
-import {collect} from '../lib/collect.ts'
+import {collect, runFiles} from '../lib/collect.ts'
 import {exportGraph} from '../lib/export-graph.ts'
 import {label} from '../lib/label.ts'
 import {inferModules} from '../lib/modules.ts'
@@ -46,6 +46,7 @@ Records V8 coverage of one browser scenario with Playwright's Chromium (docs/col
   --scenario NAME            Scenario name (default initial)
   --actions FILE             Module whose default export runs after load; its setup export runs before navigation
   --wait-ms N                Observation window after networkidle (default 1000)
+  --repeat N                 Record N times in fresh browsers; runs 2 to N get .runN before the file extension
   --expect SELECTOR          Playwright selector that must be visible at the end; repeatable
   --allow-page-error REGEX   Record page errors whose message matches instead of failing; repeatable
   --header 'NAME: VALUE'     Extra HTTP request header; repeatable
@@ -133,6 +134,7 @@ async function main() {
         scenario: {type: 'string'},
         actions: {type: 'string'},
         'wait-ms': {type: 'string'},
+        repeat: {type: 'string'},
         'cdn-prefix': {type: 'string', multiple: true},
         'allow-origin': {type: 'string', multiple: true},
         device: {type: 'string'},
@@ -153,13 +155,13 @@ async function main() {
         'browser-channel': {type: 'string'},
       },
     })
+    const number = (key: 'wait-ms' | 'repeat' | 'device-scale-factor' | 'cpu-slowdown' | 'latency-ms' | 'download-kbps' | 'upload-kbps') =>
+      values[key] === undefined ? undefined : Number(values[key])
     if (values.scenarios) {
       const {scenarios} = await loadScenarios(values.scenarios)
-      for (const scenario of scenarios) await collect(scenario)
+      for (const scenario of scenarios) await collect({...scenario, repeat: number('repeat') ?? scenario.repeat})
       return 0
     }
-    const number = (key: 'wait-ms' | 'device-scale-factor' | 'cpu-slowdown' | 'latency-ms' | 'download-kbps' | 'upload-kbps') =>
-      values[key] === undefined ? undefined : Number(values[key])
     let viewport
     if (values.viewport) {
       const match = /^(\d+)x(\d+)$/.exec(values.viewport)
@@ -181,6 +183,7 @@ async function main() {
       scenario: values.scenario,
       actions: values.actions,
       waitMs: number('wait-ms'),
+      repeat: number('repeat'),
       cdnPrefixes: values['cdn-prefix'],
       allowOrigins: values['allow-origin'],
       device: values.device,
@@ -289,9 +292,12 @@ async function main() {
   const [, file] = args.splice(at, 2)
   const {dir, scenarios} = await loadScenarios(file)
   const names = scenarios.map((s) => s.scenario)
+  // Every run of a repeated scenario; the analyzer unions them and reports their spread.
+  const coverage: string[] = []
+  for (const s of scenarios) coverage.push(s.out, ...(await runFiles(s.out)).map((run) => run.path))
   return runAnalyzer([
     ...(args.includes('--dir') ? [] : ['--dir', dir]),
-    ...scenarios.flatMap((s) => ['--coverage', s.out]),
+    ...coverage.flatMap((file) => ['--coverage', file]),
     ...(args.includes('--scenario-order') ? [] : ['--scenario-order', names.join(',')]),
     ...(args.includes('--initial-scenario') ? [] : ['--initial-scenario', names[0]]),
     ...args,

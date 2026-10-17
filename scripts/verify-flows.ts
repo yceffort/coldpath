@@ -261,6 +261,16 @@ try {
   assert.deepEqual(prefetch.prefetchedScripts, [
     {path: 'other.js', url: `http://127.0.0.1:${(app.address() as AddressInfo).port}/p/other.js`, routes: ['/about', '/tags']},
   ])
+  // used.js ran a function, so it stays recorded and the analyzer gets the prefetch evidence (#59).
+  assert.deepEqual(prefetch.prefetchEvaluatedScripts, [
+    {path: 'used.js', url: `http://127.0.0.1:${(app.address() as AddressInfo).port}/p/used.js`, routes: ['/tags']},
+  ])
+  assert(
+    prefetchSummary.includes(
+      'prefetch: router prefetches for other routes also loaded scripts whose modules evaluated; the analyzer leaves them out when nothing else ran: used.js (/tags)',
+    ),
+    prefetchSummary,
+  )
   assert.deepEqual([...new Set(prefetch.scripts.map((s: any) => s.path))].sort(), ['shared.js', 'used.js'])
   const {stderr: prefetchAnalyzed} = await run(binary, [
     '--dir',
@@ -271,8 +281,18 @@ try {
     join(artifacts, 'prefetch.json'),
   ])
   assert(prefetchAnalyzed.includes('recording warning: prefetch: the collector left out 1 scripts'), prefetchAnalyzed)
+  // Without a source map the analyzer cannot tell wrappers from functions, so used.js stays recorded.
+  assert(
+    prefetchAnalyzed.includes(
+      'recording warning: prefetch: kept 1 scripts that only router prefetches for other routes loaded, because functions in them ran: used.js (/tags)',
+    ),
+    prefetchAnalyzed,
+  )
   const prefetchReport = JSON.parse(await readFile(join(artifacts, 'prefetch.json'), 'utf8'))
   assert.equal(prefetchReport.totals.unmeasuredBytes, prefetchReport.bundles.find((b: any) => b.path === 'other.js').bytes)
+  assert.deepEqual(prefetchReport.unmeasured.bundles, [
+    {path: 'other.js', bytes: prefetchReport.totals.unmeasuredBytes, reason: 'prefetch-only', scenarios: ['prefetch']},
+  ])
 
   // A CDN copy that differs from the local build is rejected like a stale local file.
   cdnSuffix = '\n'

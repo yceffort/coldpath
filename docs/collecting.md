@@ -92,7 +92,11 @@ coldpath collect --scenarios coldpath.scenarios.json
 coldpath analyze --scenarios coldpath.scenarios.json --html artifacts/combined.html
 ```
 
-`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`), and `coldpath profile` writes `<out>/<name>.profile.json` from the same file ([CPU cost](cpu.md)). `analyze` adds `--dir`, one `--coverage` per scenario, `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, the [environment options](#device-throttling-and-authenticated-state), and the [page state checks](#checking-the-page-state) `expect` and `allowPageErrors` can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
+`collect` writes `<out>/<name>.coverage.json` for each scenario (default `out`: `coldpath-coverage`), and `coldpath profile` writes `<out>/<name>.profile.json` from the same file ([CPU cost](cpu.md)). `analyze` adds `--dir`, one `--coverage` per scenario (and per [repeated run](#repeated-runs)), `--scenario-order` in file order, and `--initial-scenario` set to the first scenario unless you pass it, then forwards your other options. Paths are relative to the scenario file. A scenario `url` resolves against the top-level `url`; `prefix`, `waitMs`, `repeat`, the [environment options](#device-throttling-and-authenticated-state), and the [page state checks](#checking-the-page-state) `expect` and `allowPageErrors` can be set at the top level or per scenario. Names may contain letters, digits, `_`, `.`, and `-`.
+
+## Repeated runs
+
+Coverage can differ between runs of one scenario when timing decides what runs, for example a request that sometimes finishes inside the observation window. `--repeat N` (`repeat` in the scenario file) records the scenario N times, each in a fresh browser. Run 1 is written to `--out`, and runs 2 to N next to it with `.runN` before the file extension (`initial.run2.coverage.json`); each envelope records `run` and `runs`. A shorter repeat removes the run files a longer one left behind. `analyze --scenarios` passes every run to the analyzer, which unions them into the scenario as it unions any recordings with the same name, and adds `runs` to the report: per scenario, the minimum, maximum, mean, and sample standard deviation of observed, unobserved, and unmeasured bytes over the runs, the same per package, and the sources whose observed or unmeasured bytes differ between runs. The CLI and Markdown summarize it; see [run-to-run spread](usage.md#run-to-run-spread). To find what two particular recordings executed differently, compare them with [`--diff`](usage.md#compare-two-recordings).
 
 ## Device, throttling, and authenticated state
 
@@ -142,28 +146,40 @@ A scenario that calls an API or loads other resources from another origin needs 
 
 ## Router prefetches
 
-A Next.js App Router page prefetches the routes of visible links, and a page segment prefetch also loads the client chunks of that route. In a Turbopack build the chunk registers its modules without evaluating them, so the recorded page would count another route's code as unobserved. The collector leaves such a script out of `scripts` and lists it in the envelope's `prefetchedScripts` with the routes that named it when three things hold: the response to a request with a `Next-Router-Prefetch` header names the script's path, no main document or other RSC response names it, and no function in it ran beyond its top level. Its bundle then counts as unmeasured in that scenario. A script that the page itself references, or whose modules ran, stays recorded. The summary lists what was left out:
+A Next.js page prefetches the routes of visible links, and the prefetch also loads the client chunks of those routes, so the recorded page would count another route's code as observed or unobserved bytes. The collector finds the chunks that only a prefetch loaded: in the App Router, the response to a request with a `Next-Router-Prefetch` header names the chunk's path; in the Pages Router, the build manifest (`__BUILD_MANIFEST`) lists it for a route other than the current page (`__NEXT_DATA__.page`). A script found this way can name further scripts in its own text, which then count for the same routes: a Turbopack Pages Router prefetch loads a small chunk list per route that lists the route's chunks. A chunk that a main document or a non-prefetch RSC response names, or that belongs to a route the scenario navigated to, is not prefetch-only and stays recorded.
+
+What happens next depends on what ran in the chunk:
+
+- Nothing beyond its top level ran (App Router with Turbopack, where the chunk only registers its modules): the collector leaves the script out of `scripts` and lists it in `prefetchedScripts` with the routes that named it. Its bundle counts as unmeasured in that scenario.
+- A function ran (webpack builds evaluate the route's entry modules as the chunk loads; the Pages Router evaluates the page module after prefetching it): the collector keeps the script and lists it in `prefetchEvaluatedScripts`. The analyzer then uses the source map to tell module evaluation from functions of the modules. Module evaluation is the script's top level, bundler wrappers such as module factories and their blocks, generated code that has no mapping of its own (webpack's chunk runtime callback, which the previous module's last mapping claims), and code that a virtual source such as webpack's `webpack://_N_E/?6e28` route entry or Turbopack's `[next]/entry/page-loader.ts` maps or claims. When only module evaluation ran, the analyzer leaves the recording of that script out, so its bundle counts as unmeasured in that scenario and a recording warning names it; when a function of a module ran, the script stays recorded with a warning saying so. A script without a source map always stays recorded, because every function in it looks like a wrapper.
+
+The summary lists both cases:
 
 ```text
 initial: left out scripts that only router prefetches for other routes loaded: chunks/1v61rpt861wcs.js (/about)
+initial: router prefetches for other routes also loaded scripts whose modules evaluated; the analyzer leaves them out when nothing else ran: chunks/app/about/page-8840b1855a00e50a.js (/about)
 ```
 
-Only App Router builds with Turbopack, the Next.js 16 default, are handled. In a webpack build the prefetched page chunk evaluates its entry modules as it loads, and the Pages Router loads other pages' chunks through its build manifest without a `Next-Router-Prefetch` request. Those chunks stay recorded, so another route's code counts as observed and unobserved bytes of the recorded page (issue [#59](https://github.com/yceffort/coldpath/issues/59)).
+The analyzer's `unmeasured` breakdown and each scenario's `unmeasuredBundles` list such bundles with the reason `prefetch-only`. `scripts/verify-next-prefetch.ts` checks App Router and Pages Router builds with Turbopack and with webpack (Next.js 16.3.8): the prefetched chunks of the other routes stay out of the recorded page, and a route the scenario navigates to is recorded. `profile` does not leave prefetched chunks out.
 
 ## Checking the page state
 
-Coverage numbers describe the page the browser showed, which can be an error or loading screen when a request was blocked or failed. After each scenario, `collect` prints the final URL, the status of the last main document response, and the numbers of console errors and page errors to stderr, plus the number of aborted requests per origin when the [origin policy](#other-origins) blocked any:
+Coverage numbers describe the page the browser showed, which can be an error or loading screen when a request was blocked or failed. After each scenario, `collect` prints the final URL, the status of the last main document response, and the numbers of console errors and page errors to stderr, then the first three console errors, the first three requests that failed or were aborted with the browser's reason, and the number of aborted requests per origin when the [origin policy](#other-origins) blocked any:
 
 ```text
 initial: final page http://127.0.0.1:3000/dashboard (document status 200), 2 console errors, 0 page errors
+initial: console errors: "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT", "Warning: Each child in a list should have a unique key"
+initial: failed requests: https://api.example.com/items (net::ERR_BLOCKED_BY_CLIENT), and 2 more
 initial: aborted requests to origins outside --allow-origin and --cdn-prefix: https://api.example.com (3)
 ```
+
+The envelope keeps every console error and warning in `consoleMessages` (`type` and `text`) and every failed or aborted request in `failedRequests` (`url` and `reason`), so two recordings can be compared for what went wrong in each. Chromium logs each request the origin policy aborts as a console error, so blocked requests usually account for most console errors.
 
 `expect` (`--expect SELECTOR`, repeatable) lists [Playwright selectors](https://playwright.dev/docs/other-locators) that must each match a visible element at the end of the scenario, such as `"expect": ["role=heading[name=\"Dashboard\"]", "text=Weekly orders", "main .chart"]`. The check runs once, without waiting, so the observation window stays as configured; actions should wait for what they need. A missing element fails the scenario, and nothing is written.
 
 A page error (an uncaught exception or an unhandled promise rejection) fails the scenario by default. `allowPageErrors: true` tolerates every page error; a list of regular expressions (`--allow-page-error REGEX`, repeatable) tolerates errors whose message matches one of them. Tolerated errors stay in the envelope's `pageErrors`, and other errors still fail the scenario with their messages.
 
-`profile` applies `expect` and `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`. The analyzer reports what an envelope recorded: a scenario with aborted origins (`blockedOrigins`), tolerated page errors, or [scripts left out after router prefetches](#router-prefetches) (`prefetchedScripts`) gets a recording warning, which is printed to stderr, listed in JSON `recordingWarnings`, and shown above the totals in Markdown and at the top of both HTML reports.
+`profile` applies `expect` and `allowPageErrors` to every run and records the distinct tolerated messages in `pageErrors`. The analyzer reports what an envelope recorded: a scenario with aborted origins (`blockedOrigins`), tolerated page errors, or [scripts left out after router prefetches](#router-prefetches) (`prefetchedScripts`, and `prefetchEvaluatedScripts` that the analyzer left out or kept) gets a recording warning, which is printed to stderr, listed in JSON `recordingWarnings`, and shown above the totals in Markdown and at the top of both HTML reports.
 
 ## Unsupported: workers
 
@@ -175,7 +191,7 @@ The collector runs the actions module's optional `setup`, starts precise V8 cove
 
 Only the page's CDP target is captured. Workers, other tabs, and server-side execution are outside its scope. Service workers and cross-origin requests other than `--cdn-prefix` and `--allow-origin` origins are blocked, so an application that calls an external API needs its origin in [`--allow-origin`](#other-origins). Unsuccessful navigation fails the capture, and so do page runtime errors that [`allowPageErrors`](#checking-the-page-state) does not tolerate. Precise coverage changes execution behavior, so capture durations are not performance measurements.
 
-Matching `.js`, `.mjs`, and `.cjs` scripts are checked against the local build with SHA-256. The artifact records those hashes, local map hashes (or explicit map absence), V8 function ranges, and capture metadata. Inline and eval scripts without a matching file extension are excluded. A missing matching file, stale build, or path outside `--dir` is an error.
+Matching `.js`, `.mjs`, and `.cjs` scripts are checked against the local build with SHA-256. The artifact records those hashes, local map hashes (or explicit map absence), V8 function ranges, capture metadata, the requests that passed the origin policy, the [console messages and failed requests](#checking-the-page-state), and the [scripts router prefetches loaded](#router-prefetches). Inline and eval scripts without a matching file extension are excluded. A missing matching file, stale build, or path outside `--dir` is an error.
 
 The collector supports adjacent `.js.map` files and relative local maps referenced by a final standalone `//# sourceMappingURL=...` or `//@ sourceMappingURL=...` comment. Its map support is narrower than the Rust analyzer: inline `data:` maps, block-comment references, explicit map overrides, and remote maps are not supported by this helper. Use external source-map files for these captures.
 

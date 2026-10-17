@@ -269,7 +269,7 @@ coldpath collect \
   --out artifacts/initial.coverage.json
 ```
 
-For Next.js, use the build's static output directory with `--prefix /_next/static/`. The collector accepts a local action module for clicks, searches, and other interactions. It prints the final page state and any requests it blocked, and `--expect SELECTOR` fails the recording when the page does not show what the scenario expects, such as after an API call failed. See [collecting coverage](docs/collecting.md) for the action API, page state checks, capture scope, and source-map limitations.
+For Next.js, use the build's static output directory with `--prefix /_next/static/`. The collector accepts a local action module for clicks, searches, and other interactions. It prints the final page state, console errors, failed requests, and any requests it blocked, and `--expect SELECTOR` fails the recording when the page does not show what the scenario expects, such as after an API call failed. `--repeat N` records a scenario N times and the analyzer reports the run-to-run spread; `coldpath --dir dist --diff a.coverage.json b.coverage.json` lists what two recordings executed differently. See [collecting coverage](docs/collecting.md) for the action API, page state checks, capture scope, and source-map limitations.
 
 ## Measure CPU cost
 
@@ -312,7 +312,7 @@ coldpath --dir dist --baseline artifacts/main.json \
   --json artifacts/pr.json --markdown artifacts/pr.md
 ```
 
-Use the same analysis-root convention and bundle selection for both builds. Reports use schema version 3 with normalized source paths; regenerate older baselines. Add matching coverage scenarios to compare execution changes, and `--initial-scenario initial --max-added-unobserved-bytes 10000` to budget initial unobserved growth. See [scenario and PR comparisons](docs/usage.md#scenarios-and-execution-phases) for measurement requirements and visual controls.
+Use the same analysis-root convention, bundle selection, and mode (with or without coverage) for both builds. Reports use schema version 3 with normalized source paths; regenerate older baselines. Add matching coverage scenarios to compare execution changes, and `--initial-scenario initial --max-added-unobserved-bytes 10000` to budget initial unobserved growth. `--max-added-package-bytes zod=5000` and `--fail-on-new-package` single out one dependency growing or entering the bundle, and `--initial-html .next/server/app/index.html --max-added-initial-bytes 5000` budgets the bytes a prerendered document loads initially, without a browser. See [scenario and PR comparisons](docs/usage.md#scenarios-and-execution-phases) for measurement requirements and visual controls.
 
 ### GitHub Action
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {execFile, execFileSync} from 'node:child_process'
-import {mkdir, readFile, writeFile} from 'node:fs/promises'
+import {mkdir, readdir, readFile, writeFile} from 'node:fs/promises'
 import {createServer} from 'node:http'
 import type {AddressInfo} from 'node:net'
 import {join} from 'node:path'
@@ -22,7 +22,10 @@ const server = createServer((request, response) => {
     response.end(servedSource)
   } else if (request.url === '/') {
     response.setHeader('content-type', 'text/html; charset=utf-8')
-    response.end('<!doctype html><meta charset="utf-8"><script src="/assets/entry.js"></script>')
+    // A console error and a request to another origin, which the origin policy aborts.
+    response.end(
+      '<!doctype html><meta charset="utf-8"><script src="/assets/entry.js"></script><script>console.error("boom"); fetch("http://127.0.0.1:1/x").catch(() => {})</script>',
+    )
   } else {
     response.writeHead(404).end()
   }
@@ -51,7 +54,7 @@ try {
   )
   for (const scenario of ['initial', 'interaction']) {
     const output = join(artifacts, `${scenario}.coverage.json`)
-    await run(process.execPath, [
+    const {stderr} = await run(process.execPath, [
       ...args,
       '--scenario',
       scenario,
@@ -63,6 +66,19 @@ try {
     assert.equal(capture.scenario, scenario)
     assert.equal(capture.scripts.length, 1)
     assert.equal(capture.scripts[0].path, 'entry.js')
+    // Console messages and failed requests are in the envelope and the summary (#64).
+    // Chromium also logs the aborted request as a console error, which is where many "console errors" come from.
+    assert.equal(capture.consoleMessages.length, 2)
+    assert.deepEqual(capture.consoleMessages[0], {type: 'error', text: 'boom'})
+    assert.match(capture.consoleMessages[1].text, /^Failed to load resource: net::ERR_BLOCKED_BY_CLIENT/)
+    assert.equal(capture.failedRequests.length, 1)
+    assert.equal(capture.failedRequests[0].url, 'http://127.0.0.1:1/x')
+    assert.match(capture.failedRequests[0].reason, /^net::ERR_BLOCKED_BY_CLIENT/)
+    assert.deepEqual(capture.blockedOrigins, ['http://127.0.0.1:1'])
+    assert.match(
+      stderr,
+      /, 2 console errors, 0 page errors\n.*: console errors: "boom", "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT[^"]*"\n.*: failed requests: http:\/\/127\.0\.0\.1:1\/x \(net::ERR_BLOCKED_BY_CLIENT[^)]*\)\n/,
+    )
     const analyze = async (inputs: string[], name: string) => {
       const report = join(artifacts, `${name}.json`)
       await run(binary, ['--dir', fixture, ...inputs.flatMap((input) => ['--coverage', input]), '--json', report])
@@ -79,6 +95,46 @@ try {
     assert.equal(actual.bundles[0].verification[0].source, 'sha256')
     assert.equal(actual.bundles[0].verification[0].sourceMap, 'capture-bound')
   }
+  // --repeat records fresh browsers into numbered files; analyze --scenarios picks every run up and reports
+  // the spread, and a shorter repeat removes stale runs.
+  const repeated = join(artifacts, 'repeated.coverage.json')
+  const {stdout: repeatLog} = await run(process.execPath, [...args, '--scenario', 'repeated', '--out', repeated, '--repeat', '3'])
+  assert.match(repeatLog, /repeated: 1 scripts, \d+ snapshots -> .*repeated\.coverage\.json \(run 1 of 3\)\n/)
+  assert.match(repeatLog, /repeated\.run3\.coverage\.json \(run 3 of 3\)\n/)
+  const runs = [1, 2, 3].map((run) => (run === 1 ? repeated : join(artifacts, `repeated.run${run}.coverage.json`)))
+  for (const [index, file] of runs.entries()) {
+    const capture = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(capture.run, index + 1)
+    assert.equal(capture.runs, 3)
+  }
+  const scenarioFile = join(artifacts, 'repeated.scenarios.json')
+  await writeFile(
+    scenarioFile,
+    JSON.stringify({
+      url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`,
+      dir: fixture,
+      prefix: '/assets/',
+      out: '.',
+      scenarios: [{name: 'repeated'}],
+    }),
+  )
+  const spreadReport = join(artifacts, 'repeated.json')
+  await run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'analyze', '--scenarios', scenarioFile, '--json', spreadReport], {
+    env: {...process.env, COLDPATH_ANALYZER: binary},
+  })
+  const spread = JSON.parse(await readFile(spreadReport, 'utf8'))
+  assert.equal(spread.scenarios.length, 1)
+  assert.deepEqual(
+    spread.runs.map((r: any) => [r.scenario, r.runs, r.totals.observedBytes.min === r.totals.observedBytes.max]),
+    [['repeated', 3, true]],
+  )
+  await run(process.execPath, [...args, '--scenario', 'repeated', '--out', repeated, '--repeat', '1'])
+  assert.deepEqual(
+    (await readdir(artifacts)).filter((name) => name.startsWith('repeated.run')),
+    [],
+  )
+  assert.equal(JSON.parse(await readFile(repeated, 'utf8')).run, undefined)
+
   // The browser and disk must match even when the URL still looks correct.
   servedSource = source + '\n'
   await assert.rejects(run(process.execPath, [...args, '--out', join(artifacts, 'stale.coverage.json')]), /browser\/disk source mismatch/)
@@ -89,4 +145,6 @@ try {
 } finally {
   await new Promise((resolve) => server.close(resolve))
 }
-console.log('Verified standalone collector, custom actions, source/map evidence, and stale-source rejection.')
+console.log(
+  'Verified standalone collector, custom actions, console and failed-request records, repeated runs, source/map evidence, and stale-source rejection.',
+)

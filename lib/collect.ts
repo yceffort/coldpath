@@ -1,9 +1,9 @@
 // Chromium creates the input; the Rust analyzer consumes it offline.
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
-import {mkdir, readFile, realpath, writeFile} from 'node:fs/promises'
+import {mkdir, readdir, readFile, realpath, rm, writeFile} from 'node:fs/promises'
 import {createRequire} from 'node:module'
-import {dirname, isAbsolute, relative, resolve, sep} from 'node:path'
+import {basename, dirname, isAbsolute, join, relative, resolve, sep} from 'node:path'
 import {pathToFileURL} from 'node:url'
 import type {Browser, BrowserContextOptions, CDPSession, Page} from 'playwright'
 
@@ -235,7 +235,8 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
       return route.continue()
     }
     blocked.set(url.origin, (blocked.get(url.origin) ?? 0) + 1)
-    return route.abort()
+    // Named after the policy, so the request shows as net::ERR_BLOCKED_BY_CLIENT in failedRequests.
+    return route.abort('blockedbyclient')
   })
   // A listener makes Chromium dispatch beforeunload, where the debugger pauses the
   // old document so its coverage and sources can be saved before navigation.
@@ -243,14 +244,18 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   const page = await context.newPage()
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  // What the page ended up showing: the last main document response and console errors.
-  const state = {status: null as number | null, consoleErrors: 0}
+  // What the page ended up showing: the last main document response, console errors and warnings, and
+  // requests that failed or were aborted, with the browser's reason.
+  const state: PageState = {status: null, consoleErrors: 0, consoleMessages: [], failedRequests: []}
   page.on('response', (response) => {
     if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) state.status = response.status()
   })
   page.on('console', (message) => {
-    if (message.type() === 'error') state.consoleErrors++
+    const type = message.type()
+    if (type === 'error') state.consoleErrors++
+    if (type === 'error' || type === 'warning') state.consoleMessages.push({type, text: message.text()})
   })
+  page.on('requestfailed', (request) => state.failedRequests.push({url: request.url(), reason: request.failure()?.errorText ?? 'unknown'}))
   const cdp = await context.newCDPSession(page)
   if (network) {
     await cdp.send('Network.enable')
@@ -266,26 +271,44 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   return {context, page, cdp, errors, blocked, requests, state}
 }
 
+export interface PageState {
+  status: number | null
+  consoleErrors: number
+  consoleMessages: {type: string; text: string}[]
+  failedRequests: {url: string; reason: string}[]
+}
+
 // The state the recording describes, so that an error or loading screen does not pass as the application.
 function summary(
   scenario: string,
   url: string,
-  state: {status: number | null; consoleErrors: number},
+  state: PageState,
   blocked: Map<string, number>,
   errors: string[],
   prefetched: Prefetched[],
+  evaluated: Prefetched[],
 ) {
   const lines = [
     `${scenario}: final page ${url} (document status ${state.status ?? 'none'}), ${state.consoleErrors} console errors, ${errors.length} page errors`,
   ]
+  const few = (items: string[]) => items.slice(0, 3).join(', ') + (items.length > 3 ? `, and ${items.length - 3} more` : '')
+  const consoleErrors = state.consoleMessages
+    .filter((message) => message.type === 'error')
+    .map((message) => JSON.stringify(message.text.length > 160 ? message.text.slice(0, 160) + '...' : message.text))
+  if (consoleErrors.length) lines.push(`${scenario}: console errors: ${few(consoleErrors)}`)
+  if (state.failedRequests.length)
+    lines.push(`${scenario}: failed requests: ${few(state.failedRequests.map(({url, reason}) => `${url} (${reason})`))}`)
   if (blocked.size) {
     const origins = [...blocked].sort(([a], [b]) => a.localeCompare(b)).map(([origin, count]) => `${origin} (${count})`)
     lines.push(`${scenario}: aborted requests to origins outside --allow-origin and --cdn-prefix: ${origins.join(', ')}`)
   }
-  if (prefetched.length) {
-    const scripts = prefetched.map(({path, routes}) => `${path} (${routes.join(', ')})`)
-    lines.push(`${scenario}: left out scripts that only router prefetches for other routes loaded: ${scripts.join(', ')}`)
-  }
+  const list = (scripts: Prefetched[]) => scripts.map(({path, routes}) => `${path} (${routes.join(', ')})`).join(', ')
+  if (prefetched.length)
+    lines.push(`${scenario}: left out scripts that only router prefetches for other routes loaded: ${list(prefetched)}`)
+  if (evaluated.length)
+    lines.push(
+      `${scenario}: router prefetches for other routes also loaded scripts whose modules evaluated; the analyzer leaves them out when nothing else ran: ${list(evaluated)}`,
+    )
   return lines.join('\n')
 }
 
@@ -299,20 +322,74 @@ const ranFunction = ({functions}: Recorded) => {
   return functions.some((f) => f.ranges[0].count > 0 && width(f) < top)
 }
 
-// Scripts that only a router prefetch for another route loaded: a prefetch response names them, no document
-// or other RSC response does, and nothing in them ran beyond their top level, so none of their modules was
-// evaluated. A path matches as a whole segment suffix, which covers both `/_next/static/chunks/a.js` and
-// `static/chunks/a.js` for `chunks/a.js`.
-function prefetchedScripts(scripts: Recorded[], prefetches: {route: string; body: string}[], pageBodies: string[]) {
-  const found = new Map<string, Prefetched>()
-  for (const {path, url} of scripts) {
-    if (found.has(url)) continue
-    const named = new RegExp(`(?<![\\w.-])${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`)
-    const routes = [...new Set(prefetches.filter(({body}) => named.test(body)).map(({route}) => route))].sort()
-    const ran = scripts.some((script) => script.url === url && ranFunction(script))
-    if (routes.length && !ran && !pageBodies.some((body) => named.test(body))) found.set(url, {path, url, routes})
+// Scripts that only a router prefetch for another route loaded: a prefetch response or the build manifest of
+// another route names them and no document or other RSC response does. `leftOut` are those in which nothing
+// ran beyond the top level, so none of their modules was evaluated (Turbopack App Router prefetches). In
+// `evaluated` a function ran: webpack and Pages Router prefetches evaluate the route's modules as the chunk
+// loads, so the analyzer decides with the source maps whether more than module evaluation ran. A path
+// matches as a whole segment suffix, which covers both `/_next/static/chunks/a.js` and `static/chunks/a.js`
+// for `chunks/a.js`.
+function prefetchedScripts(
+  scripts: Recorded[],
+  prefetches: {route: string; body: string}[],
+  pageBodies: string[],
+  sourceText: Map<string, string>,
+) {
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const matchers = new Map(scripts.map(({path}) => [path, new RegExp(`(?<![\\w.-])${escape(path)}(?![\\w.-])`)]))
+  const names = (path: string, body: string) => matchers.get(path)!.test(body)
+  // Bodies that name scripts, with the routes they stand for: prefetch responses and manifest entries, and the
+  // text of each script found, which can load further scripts for the same routes (a Turbopack page chunk list).
+  const bodies: {routes: () => string[]; body: string}[] = prefetches.map(({route, body}) => ({routes: () => [route], body}))
+  const found = new Map<string, Prefetched & {ran: boolean}>()
+  for (let grew = true; grew;) {
+    grew = false
+    for (const {path, url} of scripts) {
+      if (found.has(url) || pageBodies.some((body) => names(path, body)) || !bodies.some(({body}) => names(path, body))) continue
+      const entry = {path, url, routes: [] as string[], ran: scripts.some((script) => script.url === url && ranFunction(script))}
+      found.set(url, entry)
+      const text = sourceText.get(url)
+      if (text) bodies.push({routes: () => entry.routes, body: text})
+      grew = true
+    }
   }
-  return [...found.values()].sort((a, b) => a.path.localeCompare(b.path))
+  // Routes settle once the scripts that name a script have theirs.
+  for (let changed = true; changed;) {
+    changed = false
+    for (const entry of found.values()) {
+      const routes = [...new Set(bodies.filter(({body}) => names(entry.path, body)).flatMap(({routes}) => routes()))].sort()
+      if (routes.join('\n') !== entry.routes.join('\n')) {
+        entry.routes = routes
+        changed = true
+      }
+    }
+  }
+  const sorted = (ran: boolean) =>
+    [...found.values()]
+      .filter((entry) => entry.ran === ran)
+      .map(({path, url, routes}) => ({path, url, routes}))
+      .sort((a, b) => a.path.localeCompare(b.path))
+  return {leftOut: sorted(false), evaluated: sorted(true)}
+}
+
+// `<out>` for run 1 of a repeated recording, and `<out>` with `.runN` before the extension for the others.
+export function runPath(out: string, run: number) {
+  if (run === 1) return out
+  const suffix = ['.coverage.json', '.json'].find((s) => out.endsWith(s)) ?? ''
+  return `${out.slice(0, out.length - suffix.length)}.run${run}${suffix}`
+}
+
+// The run files next to `out` from runs 2 and up, in run order.
+export async function runFiles(out: string) {
+  const suffix = ['.coverage.json', '.json'].find((s) => out.endsWith(s)) ?? ''
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`^${escape(basename(out.slice(0, out.length - suffix.length)))}\\.run(\\d+)${escape(suffix)}$`)
+  const directory = dirname(resolve(out))
+  const names = await readdir(directory).catch(() => [] as string[])
+  return names
+    .map((name) => ({path: join(directory, name), run: Number(pattern.exec(name)?.[1])}))
+    .filter(({run}) => run >= 2)
+    .sort((a, b) => a.run - b.run)
 }
 
 // Page errors that no allowPageErrors pattern tolerates fail the scenario.
@@ -396,10 +473,23 @@ export async function environment(browser: Browser, page: Page, setup: Setup) {
   }
 }
 
-export async function collect(options: CaptureOptions & {out?: string}) {
-  const {out} = options
+// Records the scenario `repeat` times, each in a fresh browser: run 1 at `out`, the others next to it (runPath).
+export async function collect(options: CaptureOptions & {out?: string; repeat?: number}) {
+  const {out, repeat = 1} = options
   assert(options.url && options.dir && out, 'url, dir and out are required')
+  assert(Number.isInteger(repeat) && repeat >= 1, '--repeat must be a positive integer')
   const setup = await prepare(options, 'collect')
+  // Runs of an earlier, longer repeat would otherwise be analyzed together with these.
+  for (const stale of await runFiles(out)) if (stale.run > repeat) await rm(stale.path)
+  let first
+  for (let run = 1; run <= repeat; run++) {
+    const artifact = await record(setup, runPath(out, run), repeat > 1 ? {run, runs: repeat} : {})
+    first ??= artifact
+  }
+  return first!
+}
+
+async function record(setup: Setup, out: string, numbering: {run?: number; runs?: number}) {
   const {target, root, action, beforeNavigation, waitMs, scenario, localPath} = setup
 
   const browser = await setup.playwright.chromium.launch(setup.launch)
@@ -410,6 +500,8 @@ export async function collect(options: CaptureOptions & {out?: string}) {
     const scripts: (Recorded & {sha256: string; sourceMapSha256: string | null})[] = []
     const excluded = new Set<string>()
     const verified = new Map<string, {sha256: string; sourceMapSha256: string | null}>()
+    // Each script's text by URL: a script that only a prefetch loaded can name the scripts it loads in turn.
+    const sourceText = new Map<string, string>()
     const record = async () => {
       const {result} = await cdp.send('Profiler.takePreciseCoverage')
       for (const script of result) {
@@ -424,8 +516,9 @@ export async function collect(options: CaptureOptions & {out?: string}) {
           continue
         }
         if (!verified.has(script.scriptId)) {
-          const {sha256, sourceMapSha256} = await verifyScript(cdp, root, script.scriptId, path)
+          const {sha256, sourceMapSha256, scriptSource} = await verifyScript(cdp, root, script.scriptId, path)
           verified.set(script.scriptId, {sha256, sourceMapSha256})
+          sourceText.set(script.url, scriptSource)
         }
         scripts.push({
           path,
@@ -438,6 +531,14 @@ export async function collect(options: CaptureOptions & {out?: string}) {
 
     // Bodies that name scripts: Next.js router prefetches (by route) and what the page itself requested.
     const prefetches: {route: string; body: string}[] = []
+    // Routes the page navigated to, client-side navigations included: a prefetch for one of them is not for another route.
+    const visited = new Set<string>()
+    page.on('framenavigated', (frame) => {
+      if (frame !== page.mainFrame()) return
+      try {
+        visited.add(new URL(frame.url()).pathname)
+      } catch {}
+    })
     const pageBodies: string[] = []
     const reads: Promise<void>[] = []
     page.on('response', (response) => {
@@ -484,10 +585,29 @@ export async function collect(options: CaptureOptions & {out?: string}) {
     await cdp.send('Profiler.stopPreciseCoverage')
     if (failures.length) throw failures[0]
     await Promise.all(reads)
-    const prefetched = prefetchedScripts(scripts, prefetches, pageBodies)
+    // The Pages Router prefetches other pages' chunks from its build manifest, without a request that names
+    // them; the manifest lists each route's chunks, and the current page is `__NEXT_DATA__.page`.
+    prefetches.push(
+      ...(await page
+        .evaluate(() => {
+          const manifest = (globalThis as {__BUILD_MANIFEST?: unknown}).__BUILD_MANIFEST
+          const current = (globalThis as {__NEXT_DATA__?: {page?: string}}).__NEXT_DATA__?.page
+          if (!manifest || typeof manifest !== 'object') return []
+          return Object.entries(manifest)
+            .filter(([route, files]) => route.startsWith('/') && route !== current && Array.isArray(files))
+            .map(([route, files]) => ({route, body: (files as string[]).join('\n')}))
+        })
+        .catch(() => [])),
+    )
+    const {leftOut: prefetched, evaluated} = prefetchedScripts(
+      scripts,
+      prefetches.filter(({route}) => !visited.has(route)),
+      pageBodies,
+      sourceText,
+    )
     const recorded = scripts.filter(({url}) => !prefetched.some((script) => script.url === url))
     // Printed before the page error and expect checks, so a failing scenario still shows its final state.
-    console.warn(summary(scenario, page.url(), state, blocked, errors, prefetched))
+    console.warn(summary(scenario, page.url(), state, blocked, errors, prefetched, evaluated))
     checkErrors(setup, errors)
     await checkExpected(setup, page)
     assert(recorded.length > 0, 'no scripts matched --prefix or --cdn-prefix')
@@ -495,6 +615,7 @@ export async function collect(options: CaptureOptions & {out?: string}) {
     const artifact = {
       schemaVersion: 1,
       scenario,
+      ...numbering,
       capturedAt: new Date().toISOString(),
       environment: {
         ...(await environment(browser, page, setup)),
@@ -504,14 +625,19 @@ export async function collect(options: CaptureOptions & {out?: string}) {
       url: target.href,
       requests,
       blockedOrigins: [...blocked.keys()].sort(),
+      failedRequests: state.failedRequests,
+      consoleMessages: state.consoleMessages,
       pageErrors: errors,
       excludedScripts: [...excluded].sort(),
       prefetchedScripts: prefetched,
+      prefetchEvaluatedScripts: evaluated,
       scripts: recorded,
     }
     await mkdir(dirname(resolve(out)), {recursive: true})
     await writeFile(out, JSON.stringify(artifact, null, 2) + '\n')
-    console.log(`${scenario}: ${new Set(recorded.map((s) => s.path)).size} scripts, ${snapshots} snapshots -> ${out}`)
+    console.log(
+      `${scenario}: ${new Set(recorded.map((s) => s.path)).size} scripts, ${snapshots} snapshots -> ${out}${numbering.run ? ` (run ${numbering.run} of ${numbering.runs})` : ''}`,
+    )
     return artifact
   } finally {
     await browser.close()
