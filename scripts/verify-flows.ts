@@ -46,6 +46,14 @@ const api = await listen((_request, response) => {
   response.end('pong')
 })
 const apiOrigin = `http://127.0.0.1:${(api.address() as AddressInfo).port}`
+// WebSocket handshakes that reached the API server, which the request handler does not see.
+let upgrades = 0
+api.on('upgrade', (_request, socket) => {
+  upgrades++
+  socket.destroy()
+})
+// When set, the worker that the second page starts also opens a WebSocket to the API origin.
+let workerSocket = false
 let header: string | undefined
 const app = await listen(async (request, response) => {
   if (request.url === '/api') header = request.headers['x-coldpath'] as string | undefined
@@ -59,6 +67,13 @@ const app = await listen(async (request, response) => {
   else if (request.url === '/error')
     html(response, `<script src="/assets/first.js"></script><script>Promise.reject(new Error('flaky request'))</script>`)
   else if (request.url === '/second') html(response, '<script src="/assets/second.js"></script>')
+  // A WebSocket and the second hop of a redirect, which a context.route handler never sees.
+  else if (request.url === '/escape')
+    html(
+      response,
+      `<script src="/assets/first.js"></script><script>new WebSocket('${apiOrigin.replace('http', 'ws')}/socket'); fetch('/redirect').then((r) => r.text(), () => 'failed').then((text) => { document.body.append(text) })</script>`,
+    )
+  else if (request.url === '/redirect') response.writeHead(302, {location: `${apiOrigin}/via-redirect`}).end()
   // Like a Next.js router, the page loads every script that a prefetch response names.
   else if (request.url === '/prefetch')
     html(
@@ -68,6 +83,8 @@ const app = await listen(async (request, response) => {
   else if (request.url === '/about?_rsc=1') response.end('1:I[7,["/p/other.js","/p/shared.js"],"About"]')
   else if (request.url === '/tags?_rsc=1') response.end('1:I[8,["/p/other.js","/p/used.js"],"Tags"]')
   else if (request.url!.startsWith('/p/')) script(response, await readFile(join(prefetchDir, request.url!.slice(3))))
+  else if (request.url === '/assets/worker.js' && workerSocket)
+    script(response, `new WebSocket('${apiOrigin.replace('http', 'ws')}/worker')\n${await readFile(join(fixture, 'worker.js'), 'utf8')}`)
   else if (request.url!.startsWith('/assets/')) script(response, await readFile(join(fixture, request.url!.slice(8))))
   else response.writeHead(404).end()
 })
@@ -203,6 +220,36 @@ try {
   await record('error-allowed', '/error', ['--allow-page-error', '^flaky'])
   assert.deepEqual(JSON.parse(await readFile(join(artifacts, 'error-allowed.coverage.json'), 'utf8')).pageErrors, ['flaky request'])
 
+  // A WebSocket to an unlisted origin is closed before it connects and counts as aborted. A redirect has reached the
+  // origin by the time the collector sees it, so it fails the scenario until the origin is allowed (#71).
+  await assert.rejects(record('escape', '/escape', []), ({message}: Error) => {
+    assert(message.includes(`escape: aborted requests to origins outside --allow-origin and --cdn-prefix: ${apiOrigin} (1)`), message)
+    assert(message.includes('escape: requests reached origins outside --allow-origin and --cdn-prefix'), message)
+    assert(message.includes(`redirects reached ${apiOrigin}, which the origin policy cannot block`), message)
+    assert(message.includes(`/redirect -> ${apiOrigin}/via-redirect`), message)
+    // The WebSocket the route closed never opened a connection, so it is not reported as one that escaped.
+    assert(!message.includes('WebSockets reached'), message)
+    return true
+  })
+  assert.equal(upgrades, 0)
+  await record('escape-allowed', '/escape', ['--allow-origin', apiOrigin, '--expect', 'text=pong'])
+  const escapeAllowed = JSON.parse(await readFile(join(artifacts, 'escape-allowed.coverage.json'), 'utf8'))
+  assert.equal(upgrades, 1)
+  assert.deepEqual(escapeAllowed.blockedOrigins, [])
+  assert(
+    escapeAllowed.requests.some((r: any) => r.path === `${apiOrigin}/via-redirect` && r.type === 'fetch'),
+    JSON.stringify(escapeAllowed.requests),
+  )
+  // Playwright routes only the WebSockets that pages open, so one from a worker reaches the origin and fails the scenario.
+  workerSocket = true
+  await assert.rejects(collect('worker-socket', ['--cdn-prefix', cdnPrefix]), ({message}: Error) => {
+    assert(message.includes('worker-socket: requests reached origins outside --allow-origin and --cdn-prefix'), message)
+    assert(message.includes(`WebSockets reached ${apiOrigin}, which Playwright did not route, such as those workers open:`), message)
+    assert(message.includes(`${apiOrigin.replace('http', 'ws')}/worker`), message)
+    return true
+  })
+  workerSocket = false
+
   // analyze puts what the collector reported above the numbers: stderr, Markdown, and both HTML pages.
   const {stderr: analyzed} = await run(binary, [
     '--dir',
@@ -301,5 +348,5 @@ try {
   await Promise.all([app, cdn, api].map((server) => new Promise((resolve) => server.close(resolve))))
 }
 console.log(
-  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors, scripts loaded only by router prefetches and stale CDN rejection.',
+  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, WebSockets and redirects to unlisted origins, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors, scripts loaded only by router prefetches and stale CDN rejection.',
 )

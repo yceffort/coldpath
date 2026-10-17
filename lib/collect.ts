@@ -209,6 +209,9 @@ export async function prepare(
   }
 }
 
+// The http(s) origin that --allow-origin lists for a ws(s) URL.
+const socketOrigin = (url: string) => new URL(url.replace(/^ws/, 'http')).origin
+
 // A page with the shared emulation, network policy, and throttling. `beforeunload` adds the
 // listener that lets collect pause each document before it unloads. The actions module's
 // `setup` runs last, so its routes take precedence over the origin policy.
@@ -225,6 +228,9 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   // Aborted requests per origin.
   const blocked = new Map<string, number>()
   const requests: {path: string; type: string}[] = []
+  // Requests to other origins that the policy could not abort; checkOrigins fails the scenario on them.
+  const redirects: {from: string; to: string}[] = []
+  const sockets: string[] = []
   await context.route('**/*', (route) => {
     const url = new URL(route.request().url())
     if (allowed.has(url.origin)) {
@@ -238,6 +244,15 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
     // Named after the policy, so the request shows as net::ERR_BLOCKED_BY_CLIENT in failedRequests.
     return route.abort('blockedbyclient')
   })
+  // context.route sees no WebSockets. Playwright 1.48 and newer route those that pages open.
+  const routesSockets = typeof context.routeWebSocket === 'function'
+  if (routesSockets)
+    await context.routeWebSocket('**', (route) => {
+      const origin = socketOrigin(route.url())
+      if (allowed.has(origin)) return route.connectToServer()
+      blocked.set(origin, (blocked.get(origin) ?? 0) + 1)
+      return route.close({code: 1008, reason: 'blocked by the coldpath origin policy'})
+    })
   // A listener makes Chromium dispatch beforeunload, where the debugger pauses the
   // old document so its coverage and sources can be saved before navigation.
   if (beforeunload) await context.addInitScript(() => addEventListener('beforeunload', () => {}))
@@ -256,6 +271,21 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
     if (type === 'error' || type === 'warning') state.consoleMessages.push({type, text: message.text()})
   })
   page.on('requestfailed', (request) => state.failedRequests.push({url: request.url(), reason: request.failure()?.errorText ?? 'unknown'}))
+  // The route handler sees only the first URL of a redirect chain, so the later hops are checked here.
+  page.on('request', (request) => {
+    let first = request.redirectedFrom()
+    if (!first) return
+    while (first.redirectedFrom()) first = first.redirectedFrom()!
+    const url = new URL(request.url())
+    if (allowed.has(url.origin))
+      requests.push({path: url.origin === target.origin ? url.pathname + url.search : url.href, type: request.resourceType()})
+    else redirects.push({from: first.url(), to: request.url()})
+  })
+  // WebSockets that opened a connection. One the route above closed never does, so with routeWebSocket these are
+  // ones Playwright did not route, such as those workers open, or ones a setup route connected itself.
+  page.on('websocket', (socket) => {
+    if (!allowed.has(socketOrigin(socket.url()))) sockets.push(socket.url())
+  })
   const cdp = await context.newCDPSession(page)
   if (network) {
     await cdp.send('Network.enable')
@@ -268,7 +298,7 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   }
   if (cpuSlowdown) await cdp.send('Emulation.setCPUThrottlingRate', {rate: cpuSlowdown})
   if (beforeNavigation) await beforeNavigation({page, context})
-  return {context, page, cdp, errors, blocked, requests, state}
+  return {context, page, cdp, errors, blocked, requests, state, redirects, sockets, routesSockets}
 }
 
 export interface PageState {
@@ -401,6 +431,22 @@ export function checkErrors(setup: Setup, errors: string[]) {
   )
 }
 
+// A redirect or WebSocket that reached an origin outside the allow list fails the scenario: the recording
+// would depend on a live external service.
+export function checkOrigins(setup: Setup, redirects: {from: string; to: string}[], sockets: string[], routesSockets: boolean) {
+  const origins = (urls: string[]) => [...new Set(urls)].sort().join(', ')
+  const parts = [
+    sockets.length &&
+      `WebSockets reached ${origins(sockets.map(socketOrigin))}, ${routesSockets ? 'which Playwright did not route, such as those workers open' : `which Playwright ${setup.playwright.version} cannot block and 1.48 or newer can`}:\n${sockets.map((url) => `  ${url}`).join('\n')}`,
+    redirects.length &&
+      `redirects reached ${origins(redirects.map(({to}) => new URL(to).origin))}, which the origin policy cannot block:\n${redirects.map(({from, to}) => `  ${from} -> ${to}`).join('\n')}`,
+  ].filter(Boolean)
+  assert(
+    !parts.length,
+    `${setup.scenario}: requests reached origins outside --allow-origin and --cdn-prefix; allow the origin with allowOrigins or --allow-origin${sockets.length && !routesSockets ? ' or upgrade Playwright' : ''}:\n${parts.join('\n')}`,
+  )
+}
+
 // Every expect selector must match a visible element; checked without waiting, after the scenario ends.
 export async function checkExpected(setup: Setup, page: Page) {
   const missing = []
@@ -494,7 +540,9 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
 
   const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
-    const {context, page, cdp, errors, blocked, requests, state} = await open(browser, setup, {beforeunload: true})
+    const {context, page, cdp, errors, blocked, requests, state, redirects, sockets, routesSockets} = await open(browser, setup, {
+      beforeunload: true,
+    })
 
     const failures: unknown[] = []
     const scripts: (Recorded & {sha256: string; sourceMapSha256: string | null})[] = []
@@ -614,6 +662,7 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
     const recorded = scripts.filter(({url}) => !prefetched.some((script) => script.url === url))
     // Printed before the page error and expect checks, so a failing scenario still shows its final state.
     console.warn(summary(scenario, page.url(), state, blocked, errors, prefetched, evaluated))
+    checkOrigins(setup, redirects, sockets, routesSockets)
     checkErrors(setup, errors)
     await checkExpected(setup, page)
     assert(recorded.length > 0, 'no scripts matched --prefix or --cdn-prefix')

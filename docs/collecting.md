@@ -67,7 +67,7 @@ export async function setup({ context }) {
 }
 ```
 
-Playwright runs the most recently registered route first, so routes from `setup` run before the collector's [origin policy](#other-origins). A fulfilled request never reaches the network and appears in neither `requests` nor `blockedOrigins`. `route.fallback()` hands a request to the origin policy; `route.continue()` sends it to the network even when its origin is not allowed. `environment.observation` starts with `setup before navigation` when a `setup` ran.
+Playwright runs the most recently registered route first, so routes from `setup` run before the collector's [origin policy](#other-origins). A fulfilled request never reaches the network and appears in neither `requests` nor `blockedOrigins`. `route.fallback()` hands a request to the origin policy; `route.continue()` sends it to the network even when its origin is not allowed. A WebSocket that a `setup` route connects to an origin that is not allowed still fails the scenario, because the collector cannot tell it from [one Playwright did not route](#other-origins). `environment.observation` starts with `setup before navigation` when a `setup` ran.
 
 ## Scenario files
 
@@ -143,6 +143,8 @@ Envelope scripts record the browser `url` they were matched from.
 ## Other origins
 
 A scenario that calls an API or loads other resources from another origin needs that origin in `--allow-origin` (repeatable; `allowOrigins` in a scenario file, at the top level or per scenario), such as `https://api.example.com`. Requests to it pass through and appear in the envelope's `requests`; scripts it serves are not attributed, so list a script origin under `--cdn-prefix` instead. `environment.allowedOrigins` records the allowed origins. The recording then depends on what that service returned at the time, so a different response can change which code runs.
+
+The origin policy is a Playwright route, which sees only the first URL of a redirect and no WebSocket, so the collector handles both separately. A WebSocket to an origin that is not allowed is closed with code 1008 before it connects and counts in `blockedOrigins` and the summary like an aborted request. `--allow-origin` allows a WebSocket by the http(s) origin of its URL, such as `https://api.example.com` for `wss://api.example.com/socket`. Closing it needs Playwright 1.48 or newer, and Playwright does not route a WebSocket that a worker opens. Such a WebSocket, and with an older Playwright any WebSocket to an origin that is not allowed, reaches its origin, so it fails the scenario with an error that names the origin. A redirect has already reached its target when the collector sees it, so a redirect to an origin that is not allowed fails the scenario with an error that lists each redirect; add the origin to `--allow-origin` when the page depends on it. A redirect to an allowed origin is listed in `requests` like any other request.
 
 ## Router prefetches
 

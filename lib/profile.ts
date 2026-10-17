@@ -7,7 +7,7 @@ import {cpus} from 'node:os'
 import {dirname, resolve} from 'node:path'
 import {promisify} from 'node:util'
 
-import {checkErrors, checkExpected, checkScript, environment, open, prepare, verifyScript} from './collect.ts'
+import {checkErrors, checkExpected, checkOrigins, checkScript, environment, open, prepare, verifyScript} from './collect.ts'
 import type {CaptureOptions, Setup} from './collect.ts'
 
 // The fields of a CDP Profiler.Profile that are read.
@@ -149,7 +149,7 @@ async function measure(entry: Entry) {
   const {target, root, action, waitMs, localPath} = setup
   const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
-    const {context, page, cdp, errors, blocked} = await open(browser, setup)
+    const {context, page, cdp, errors, blocked, redirects, sockets, routesSockets} = await open(browser, setup)
     // page.goto commits the first document. Downloads and 204 responses commit none.
     let documents = 0
     cdp.on('Page.frameNavigated', ({frame}) => {
@@ -177,6 +177,7 @@ async function measure(entry: Entry) {
       profiles.action = (await cdp.send('Profiler.stop')).profile
     }
     assert.equal(documents, 1, 'coldpath profile does not support multi-document navigation flows; profile each page as its own scenario')
+    checkOrigins(setup, redirects, sockets, routesSockets)
     checkErrors(setup, errors)
     await checkExpected(setup, page)
 
