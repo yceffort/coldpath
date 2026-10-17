@@ -1194,8 +1194,39 @@ fn url_mapping_is_explicit_and_rejects_traversal() {
             "input.json",
             &json!([{"url":url,"text":"abcd","ranges":[]}]).to_string(),
         );
-        assert!(coldpath::analyze_with_options(&fixture.0, &[path], &options).is_err());
+        let error = coldpath::analyze_with_options(&fixture.0, &[path], &options).unwrap_err();
+        assert!(format!("{error:#}").contains(url), "{error:#}");
     }
+}
+
+#[test]
+fn coverage_url_equal_to_the_url_prefix_is_skipped() {
+    let fixture = Fixture::new();
+    fixture.write("app.js", "abcd");
+    // Nothing is left of the document URL after the prefix.
+    let path = fixture.write(
+        "input.json",
+        &json!([
+            {"url":"https://example.com/","text":"<html></html>","ranges":[]},
+            {"url":"https://example.com/app.js","text":"abcd","ranges":[{"start":0,"end":1}]}
+        ])
+        .to_string(),
+    );
+    let mut options = coldpath::AnalyzeOptions::default();
+    options
+        .input
+        .url_prefixes
+        .push("https://example.com/".into());
+    let report = coldpath::analyze_with_options(&fixture.0, &[path], &options).unwrap();
+    assert_eq!(report.totals.observed_bytes, 1);
+    assert_eq!(report.totals.unobserved_bytes, 3);
+    assert!(
+        report
+            .warnings
+            .contains(&"skipped non-JavaScript coverage URL \"https://example.com/\"".into()),
+        "{:?}",
+        report.warnings
+    );
 }
 
 #[test]

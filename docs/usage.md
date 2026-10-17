@@ -62,7 +62,7 @@ coldpath --dir dist \
   --html artifacts/report.html
 ```
 
-Prefixes must end with `/`; the longest matching prefix wins. Query strings and fragments are removed and the path is percent-decoded. A `file://` URL referring to a file inside `--dir` is mapped automatically.
+Prefixes must end with `/`; the longest matching prefix wins. Query strings and fragments are removed and the path is percent-decoded. A URL equal to a prefix, such as the page itself, names no file and is skipped with a warning. A `file://` URL referring to a file inside `--dir` is mapped automatically.
 
 Use `--script-map paths.json` to map exact URLs, including queries:
 

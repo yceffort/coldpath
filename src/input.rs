@@ -167,7 +167,10 @@ fn local_path(url: &str, root: &Path, options: &InputOptions) -> Result<Option<S
         let path = percent_encoding::percent_decode_str(&clean[prefix.len()..])
             .decode_utf8()?
             .into_owned();
-        coverage::validate_path(&path)?;
+        // A URL equal to the prefix, such as the page itself, is left for the caller to skip.
+        if !path.is_empty() {
+            coverage::validate_path(&path).with_context(|| format!("coverage URL {url}"))?;
+        }
         return Ok(Some(path));
     }
     if let Some(path) = clean.strip_prefix("file://") {
