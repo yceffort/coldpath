@@ -296,8 +296,13 @@ impl Decoder<'_> {
             }
             DecodedMap::Regular(map) => {
                 // Resolve each source path once per map, never once per token.
+                // The sourcemap crate reads a `null` source as an empty name.
                 let raw: Vec<&str> = (0..map.get_source_count())
-                    .map(|i| map.get_source(i).unwrap_or(UNMAPPED))
+                    .map(|i| {
+                        map.get_source(i)
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or(UNMAPPED)
+                    })
                     .collect();
                 let resolved: Vec<String> = raw
                     .iter()

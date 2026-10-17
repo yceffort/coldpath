@@ -1164,6 +1164,34 @@ fn source_paths_keep_spellings_whose_contents_differ_within_one_map() {
 }
 
 #[test]
+fn null_map_sources_are_unmapped() {
+    let fixture = Fixture::new();
+    fs::create_dir_all(fixture.0.join("assets")).unwrap();
+    fixture.write("assets/app.js", "var a=1;var b=2;");
+    fixture.write(
+        "assets/app.js.map",
+        &json!({"version":3,"sources":[null,"../../src/a.js"],"names":[],"mappings":"AAAA,QCAA"})
+            .to_string(),
+    );
+    // Resolving the empty name would give the map's directory: `assets`, or `.` at the root.
+    for (root, source) in [
+        (fixture.0.clone(), "../src/a.js"),
+        (fixture.0.join("assets"), "../../src/a.js"),
+    ] {
+        let report = analyze(&root, &[]).unwrap();
+        assert_eq!(
+            report
+                .sources
+                .iter()
+                .map(|s| (s.source.as_str(), s.counts.bytes))
+                .collect::<Vec<_>>(),
+            vec![(source, 8), ("[unmapped]", 8)]
+        );
+        assert_eq!(report.unmapped.gap_bytes, 8);
+    }
+}
+
+#[test]
 fn url_mapping_is_explicit_and_rejects_traversal() {
     let fixture = Fixture::new();
     fixture.write("app.js", "abcd");
