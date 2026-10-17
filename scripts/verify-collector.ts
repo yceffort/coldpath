@@ -21,6 +21,8 @@ const site = join(artifacts, 'site')
 const siteScripts: Record<string, string> = {
   // A `debugger` statement must not stop the page (#67).
   'debugger.js': 'function afterDebugger(){return 1}\nsetTimeout(() => { debugger; window.done = afterDebugger() }, 200)\n',
+  // V8 reports a final `//# sourceURL` comment as the script's url (#74).
+  'renamed.js': 'function renamed(){return 2}\nwindow.result = renamed()\n//# sourceURL=renamed-bundle.js\n',
 }
 await mkdir(site, {recursive: true})
 for (const [name, text] of Object.entries(siteScripts)) await writeFile(join(site, name), text)
@@ -163,6 +165,13 @@ try {
   // Other debugger pauses are resumed, so collect finishes and records the code after the statement.
   const paused = await siteCollect('debugger')
   assert.equal(paused.scripts[0].functions.find((f: any) => f.functionName === 'afterDebugger').ranges[0].count, 1)
+  // A renamed script is recorded under the path it was served from.
+  const renamed = await siteCollect('renamed')
+  assert.deepEqual(
+    renamed.scripts.map((s: any) => [s.path, new URL(s.url).pathname]),
+    [['renamed.js', '/site/renamed.js']],
+  )
+  assert.equal(renamed.scripts[0].functions.find((f: any) => f.functionName === 'renamed').ranges[0].count, 1)
 
   // The browser and disk must match even when the URL still looks correct.
   servedSource = source + '\n'

@@ -502,27 +502,30 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
     const verified = new Map<string, {sha256: string; sourceMapSha256: string | null}>()
     // Each script's text by URL: a script that only a prefetch loaded can name the scripts it loads in turn.
     const sourceText = new Map<string, string>()
+    // A `//# sourceURL` comment replaces `url`; `embedderName` keeps the URL the script came from.
+    const embedderNames = new Map<string, string>()
     const record = async () => {
       const {result} = await cdp.send('Profiler.takePreciseCoverage')
       for (const script of result) {
-        const path = localPath(script.url)
+        const url = (localPath(script.url) === null && embedderNames.get(script.scriptId)) || script.url
+        const path = localPath(url)
         if (path === null) {
-          if (script.url) excluded.add(script.url)
+          if (url) excluded.add(url)
           continue
         }
         // Inline/eval scripts have no matching generated file under --dir.
         if (!/\.(?:js|mjs|cjs)$/i.test(path)) {
-          excluded.add(script.url)
+          excluded.add(url)
           continue
         }
         if (!verified.has(script.scriptId)) {
           const {sha256, sourceMapSha256, scriptSource} = await verifyScript(cdp, root, script.scriptId, path)
           verified.set(script.scriptId, {sha256, sourceMapSha256})
-          sourceText.set(script.url, scriptSource)
+          sourceText.set(url, scriptSource)
         }
         scripts.push({
           path,
-          url: script.url,
+          url,
           ...verified.get(script.scriptId)!,
           functions: script.functions,
         })
@@ -572,6 +575,8 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
         .catch((error) => failures.push(error))
         .finally(() => cdp.send('Debugger.resume').catch(() => {}))
     })
+    // Before Debugger.enable, which reports the scripts already parsed.
+    cdp.on('Debugger.scriptParsed', ({scriptId, embedderName}) => embedderNames.set(scriptId, embedderName ?? ''))
 
     await cdp.send('Debugger.enable')
     await cdp.send('DOMDebugger.setEventListenerBreakpoint', {eventName: 'beforeunload'})
