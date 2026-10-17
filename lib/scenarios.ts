@@ -18,6 +18,10 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
       typeof scenario.name === 'string' && /^[\w.-]+$/.test(scenario.name),
       `${file}: invalid scenario name ${JSON.stringify(scenario.name)}`,
     )
+    assert(
+      !/\.run\d+$/.test(scenario.name),
+      `${file}: scenario name ${scenario.name} must not end in .run<N>: collect --repeat writes runs 2 to N of a scenario as <name>.run<N>.coverage.json`,
+    )
     assert(!names.has(scenario.name), `${file}: duplicate scenario ${scenario.name}`)
     names.add(scenario.name)
     const url = scenario.url ?? config.url

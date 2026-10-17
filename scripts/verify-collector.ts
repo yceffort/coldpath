@@ -190,6 +190,22 @@ try {
     run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'collect', '--scenarios', overrideFile, '--out', 'x.json']),
     /--scenarios does not take --url\/--dir\/--out\/--scenario\/--actions/,
   )
+  // A scenario named like a repeat run of another would be removed and analyzed as that run.
+  const runNamed = join(artifacts, 'run-named.scenarios.json')
+  await writeFile(
+    runNamed,
+    JSON.stringify({
+      url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`,
+      dir: fixture,
+      prefix: '/assets/',
+      out: '.',
+      scenarios: [{name: 'home'}, {name: 'home.run2'}],
+    }),
+  )
+  await assert.rejects(
+    run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'collect', '--scenarios', runNamed]),
+    /scenario name home\.run2 must not end in \.run<N>/,
+  )
 
   const siteCollect = async (name: string) => {
     const output = join(artifacts, `${name}.coverage.json`)
