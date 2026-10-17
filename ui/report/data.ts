@@ -5,6 +5,10 @@ export async function decodeData<T>(id: string): Promise<T> {
   const data = document.getElementById(id)!
   let payload = data.textContent!
   if (data.dataset.encoding === 'gzip-base64') {
+    if (typeof DecompressionStream === 'undefined')
+      throw new Error(
+        'it needs a browser with DecompressionStream (Chrome 80, Firefox 113, Safari 16.4 or newer). Without one, use the --json export.',
+      )
     const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))
     payload = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
   }

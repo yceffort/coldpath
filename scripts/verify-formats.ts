@@ -227,6 +227,20 @@ try {
   assert.deepEqual(errors, [])
   assert.deepEqual(requests, [])
   summary.checks.push('large HTML payload decodes gzip offline and preserves source/interval navigation')
+
+  // Without DecompressionStream, a compressed payload names the browsers that have it and the JSON export.
+  const legacy = await browser.newPage()
+  await legacy.addInitScript(() => Reflect.deleteProperty(globalThis, 'DecompressionStream'))
+  await legacy.goto(pathToFileURL(compressedHtml).href)
+  await legacy.getByRole('button', {name: 'app.js', exact: true}).click()
+  await legacy.getByRole('button', {name: 'large.ts', exact: true}).click()
+  await legacy.locator('#active-range', {hasText: 'Could not load code'}).waitFor()
+  assert.match(
+    (await legacy.locator('#active-range').textContent())!,
+    /needs a browser with DecompressionStream \(Chrome 80, Firefox 113, Safari 16\.4 or newer\)\. Without one, use the --json export\./,
+  )
+  await legacy.close()
+  summary.checks.push('HTML without DecompressionStream names the browsers that have it and the JSON export')
 } finally {
   await browser?.close()
   await new Promise((resolve) => server.close(resolve))
