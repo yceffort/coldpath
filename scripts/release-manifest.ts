@@ -12,6 +12,9 @@ if (process.argv[2] && process.argv[2] !== `v${manifest.version}`)
 const plugin = JSON.parse(await readFile(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
 if (plugin.version !== manifest.version)
   throw new Error(`.claude-plugin/plugin.json version ${plugin.version} does not match version ${manifest.version}`)
+// The binary reports this version in --version and in evidence manifests.
+const cargo = (await readFile(new URL('../Cargo.toml', import.meta.url), 'utf8')).match(/^version = "(.*)"/m)?.[1]
+if (cargo !== manifest.version) throw new Error(`Cargo.toml version ${cargo} does not match version ${manifest.version}`)
 manifest.optionalDependencies = Object.fromEntries(PLATFORMS.map((platform) => [`@yceffort/coldpath-${platform}`, manifest.version]))
 await writeFile(file, JSON.stringify(manifest, null, 2) + '\n')
 console.log(`optionalDependencies: ${Object.keys(manifest.optionalDependencies).join(', ')}`)

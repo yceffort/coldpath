@@ -67,13 +67,15 @@ jobs:
       # Platform packages first: the main package's optionalDependencies must resolve when it appears.
       # The ./ prefix keeps npm from reading dist/<name>.tgz as a GitHub user/repo shorthand.
       # npm trusted publishing: authenticated by this job's OIDC token (id-token: write), no npm token.
-      # Versions already on npm are skipped so a failed release can be re-run from its tag.
+      # Versions already on npm, of these and of the main package, are skipped so a failed release can be re-run from its tag.
       - run: |
           for tarball in ./dist/*.tgz; do
             name=$(tar -xOzf "$tarball" package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); `${p.name}@${p.version}`')
             if npm view "$name" version >/dev/null 2>&1; then echo "skip $name"; else npm publish "$tarball" --access public --provenance; fi
           done
-      - run: npm publish --access public --provenance
+      - run: |
+          name="@yceffort/coldpath@${GITHUB_REF_NAME#v}"
+          if npm view "$name" version >/dev/null 2>&1; then echo "skip $name"; else npm publish --access public --provenance; fi
       - run: gh release create "$GITHUB_REF_NAME" dist/*.tgz --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
