@@ -290,6 +290,20 @@ try {
       })),
     }),
   )
+  // Three copies that first differ at different depths: two would still share `(web)`, so those show their full source.
+  await writeFile(join(pnpm, 'apps.js'), ';'.repeat(60))
+  await writeFile(
+    join(pnpm, 'apps.js.map'),
+    JSON.stringify({
+      version: 3,
+      sections: ['web/node_modules/.pnpm/tslib@2.6.2', 'web/node_modules/.pnpm/tslib@1.14.1', 'docs/node_modules/.pnpm/tslib@2.6.2'].map(
+        (store, i) => ({
+          offset: {line: 0, column: [0, 30, 50][i]},
+          map: {version: 3, sources: [`apps/${store}/node_modules/tslib/tslib.js`], names: [], mappings: 'AAAA'},
+        }),
+      ),
+    }),
+  )
   const pnpmHtml = join(output, 'pnpm.html')
   execFileSync(binary, ['--dir', pnpm, '--treemap', pnpmHtml], {stdio: 'pipe'})
   await page.goto(pathToFileURL(pnpmHtml).href)
@@ -298,6 +312,14 @@ try {
   assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => [tile.ariaLabel, tile.dataset.bytes])), [
     ['tslib.js (tslib@1.14.1), 30 bytes', '30'],
     ['tslib.js (tslib@2.6.2), 10 bytes', '10'],
+  ])
+  await page.goto(pathToFileURL(pnpmHtml).href)
+  await page.getByRole('button', {name: 'apps.js', exact: true}).click()
+  await page.getByRole('button', {name: 'node_modules/tslib', exact: true}).click()
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => [tile.ariaLabel, tile.dataset.bytes])), [
+    ['tslib.js (apps/web/node_modules/.pnpm/tslib@2.6.2/node_modules/tslib/tslib.js), 30 bytes', '30'],
+    ['tslib.js (apps/web/node_modules/.pnpm/tslib@1.14.1/node_modules/tslib/tslib.js), 20 bytes', '20'],
+    ['tslib.js (docs), 10 bytes', '10'],
   ])
 
   // One source shipped in two bundles: JSON counts the copies, and the treemap lists the extra bytes.

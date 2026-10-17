@@ -162,7 +162,11 @@ export function build(report: Report, {group, scenario, initial}: {group: string
       const paths = same.map((file) => file.source!.split('/'))
       let i = 0
       while (paths.every((path) => path[i] === paths[0][i])) i++
-      same.forEach((file, j) => (file.name += ' (' + (paths[j][i] || file.source) + ')'))
+      const parts = same.map((file, j) => paths[j][i] || file.source!)
+      // Three or more copies can still share that segment (A/p/q/x.js, A/p/r/x.js, B/p/q/x.js), so those show their full source.
+      same.forEach(
+        (file, j) => (file.name += ' (' + (parts.indexOf(parts[j]) === parts.lastIndexOf(parts[j]) ? parts[j] : file.source) + ')'),
+      )
     }
   }
   distinguish(root)
