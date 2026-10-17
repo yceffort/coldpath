@@ -144,6 +144,24 @@ try {
     spread.runs.map((r: any) => [r.scenario, r.runs, r.totals.observedBytes.min === r.totals.observedBytes.max]),
     [['repeated', 3, true]],
   )
+  // The wrapper reads the `--name=value` forms too, and an option it reads needs its value.
+  const emptyMaps = join(artifacts, 'empty.maps.json')
+  await writeFile(emptyMaps, '{}')
+  const equalsReport = join(artifacts, 'repeated-equals.json')
+  const analyzeCli = (...extra: string[]) =>
+    run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'analyze', ...extra], {env: {...process.env, COLDPATH_ANALYZER: binary}})
+  await analyzeCli(
+    `--scenarios=${scenarioFile}`,
+    `--dir=${fixture}`,
+    '--initial-scenario=repeated',
+    '--scenario-order=repeated',
+    `--maps-json=${emptyMaps}`,
+    '--json',
+    equalsReport,
+  )
+  assert.deepEqual(JSON.parse(await readFile(equalsReport, 'utf8')).totals, spread.totals)
+  for (const option of ['--maps-json', '--scenarios'])
+    await assert.rejects(analyzeCli(option), new RegExp(`coldpath: ${option} requires a file`))
   await run(process.execPath, [...args, '--scenario', 'repeated', '--out', repeated, '--repeat', '1'])
   assert.deepEqual(
     (await readdir(artifacts)).filter((name) => name.startsWith('repeated.run')),

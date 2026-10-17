@@ -285,11 +285,16 @@ async function main() {
     await label({...values, baseUrl: values['base-url']})
     return 0
   }
-  const args = command === 'analyze' ? rest : [command, ...rest]
+  // `--name=value` as two elements for the options read below, as clap accepts both forms.
+  const args = (command === 'analyze' ? rest : [command, ...rest]).flatMap((arg) => {
+    const match = /^(--(?:scenarios|dir|initial-scenario|scenario-order|maps-json))=(.*)$/s.exec(arg)
+    return match ? [match[1], match[2]] : [arg]
+  })
   // Each maps.json maps bundle paths to map files relative to itself; later files override earlier ones.
   const bindings: Record<string, string> = {}
   for (let at; (at = args.indexOf('--maps-json')) >= 0;) {
     const [, file] = args.splice(at, 2)
+    if (file === undefined) throw new Error('--maps-json requires a file')
     for (const [bundle, map] of Object.entries(JSON.parse(await readFile(file, 'utf8'))))
       bindings[bundle] = resolve(dirname(file), map as string)
   }
@@ -297,6 +302,7 @@ async function main() {
   const at = args.indexOf('--scenarios')
   if (at < 0) return runAnalyzer(args)
   const [, file] = args.splice(at, 2)
+  if (file === undefined) throw new Error('--scenarios requires a file')
   const {dir, scenarios} = await loadScenarios(file)
   const names = scenarios.map((s) => s.scenario)
   // Every run of a repeated scenario; the analyzer unions them and reports their spread.
