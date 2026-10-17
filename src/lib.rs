@@ -1634,9 +1634,21 @@ pub fn unmeasured_reason(bundle: &UnmeasuredBundle) -> String {
 }
 
 /// The selected bundles a document names: a bundle's analysis-root-relative path appears in the
-/// HTML as a whole path suffix, so `/_next/static/chunks/a.js` names `chunks/a.js`. Script tags,
+/// HTML as a whole path suffix, so `/_next/static/chunks/a.js` names `chunks/a.js`, as is or with
+/// each segment encoded the way Next.js writes it (`app/%5Bslug%5D/page.js`). Script tags,
 /// preload links, and references inside inline scripts (such as an RSC payload) all count.
 fn initial_load(html: &Path, bundles: &[BundleRow]) -> Result<InitialLoad> {
+    // What JavaScript's encodeURIComponent leaves unencoded.
+    const URI_COMPONENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'_')
+        .remove(b'.')
+        .remove(b'!')
+        .remove(b'~')
+        .remove(b'*')
+        .remove(b'\'')
+        .remove(b'(')
+        .remove(b')');
     let text = String::from_utf8_lossy(
         &fs::read(html).with_context(|| format!("read --initial-html {}", html.display()))?,
     )
@@ -1648,10 +1660,22 @@ fn initial_load(html: &Path, bundles: &[BundleRow]) -> Result<InitialLoad> {
     let mut named = Vec::new();
     for bundle in bundles {
         let path = bundle.path.as_str();
-        if text.match_indices(path).any(|(at, _)| {
-            boundary(text[..at].chars().next_back())
-                && boundary(text[at + path.len()..].chars().next())
-        }) {
+        let encoded = path
+            .split('/')
+            .map(|segment| {
+                percent_encoding::utf8_percent_encode(segment, URI_COMPONENT).to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        if std::iter::once(path)
+            .chain((encoded != path).then_some(encoded.as_str()))
+            .any(|path| {
+                text.match_indices(path).any(|(at, _)| {
+                    boundary(text[..at].chars().next_back())
+                        && boundary(text[at + path.len()..].chars().next())
+                })
+            })
+        {
             bytes += bundle.counts.bytes;
             named.push(bundle.path.clone());
         }

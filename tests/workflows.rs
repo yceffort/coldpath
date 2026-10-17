@@ -1591,6 +1591,31 @@ fn initial_html_names_the_bundles_a_document_loads() {
 }
 
 #[test]
+fn initial_html_names_percent_encoded_chunk_paths() {
+    let f = Fixture::new();
+    fs::create_dir_all(f.0.join("chunks/app/[slug]")).unwrap();
+    f.write("chunks/main-1.js", "abcd");
+    f.write("chunks/app/[slug]/page-abc.js", "efghij");
+    // Next.js encodes each path segment with encodeURIComponent.
+    f.write("index.html", "<script src=\"/_next/static/chunks/main-1.js\" async></script><script src=\"/_next/static/chunks/app/%5Bslug%5D/page-abc.js\" async></script>");
+    let output = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--dir", ".", "--initial-html", "index.html", "--json", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["initialLoad"],
+        json!({"html": "index.html", "bytes": 10, "bundles": ["chunks/app/[slug]/page-abc.js", "chunks/main-1.js"]})
+    );
+}
+
+#[test]
 fn repeated_runs_report_their_spread_per_scenario_package_and_source() {
     let f = Fixture::new();
     let source = "abcdefgh";
