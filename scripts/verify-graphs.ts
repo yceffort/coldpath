@@ -56,6 +56,17 @@ try {
       ['f', 'require'],
     ],
   )
+  // In a .ts file `<number>a` is a type assertion, not JSX, and `import x = require()` is a top-level require (#76).
+  assert.deepEqual(
+    importSites(
+      "import {a} from './a'\nconst n = <number>a\nimport x = require('./y')\nimport type T = require('./t')\n",
+      'assertion.ts',
+    ).map((s) => [s.specifier, s.kind, s.location.line, s.topLevel]),
+    [
+      ['./a', 'static', 1, undefined],
+      ['./y', 'require', 3, true],
+    ],
+  )
   // A require() is top level only when it runs whenever its module evaluates (#46).
   assert.deepEqual(
     importSites(

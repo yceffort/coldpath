@@ -93,11 +93,18 @@ const foldedAtBuild = (test: any) =>
 
 // Parse syntax, never execute a module. Dynamic expressions stay unresolved.
 export function importSites(code: string, filename: string): ImportSite[] {
+  // JSX would read `<number>a` in a .ts file as a tag, and JavaScript may contain JSX. Unknown extensions get both plugins.
+  const ext = /\.([cm]?[jt]sx?)(?:\?|$)/.exec(filename)?.[1] ?? 'tsx'
   const ast = parse(code, {
     sourceType: 'unambiguous',
     sourceFilename: filename,
     createImportExpressions: true,
-    plugins: ['jsx', 'typescript', 'decorators-legacy', 'importAttributes'],
+    plugins: [
+      ...(ext.includes('ts') ? ['typescript' as const] : []),
+      ...(/^[cm]?ts$/.test(ext) ? [] : ['jsx' as const]),
+      'decorators-legacy',
+      'importAttributes',
+    ],
   })
   const sites: ImportSite[] = []
   // Babel AST nodes, walked generically.
@@ -109,6 +116,13 @@ export function importSites(code: string, filename: string): ImportSite[] {
       if (node.specifiers?.length && node.specifiers.every((s: any) => s.importKind === 'type' || s.exportKind === 'type')) return
       value = node.source?.value
       kind = 'static'
+    } else if (
+      node.type === 'TSImportEqualsDeclaration' &&
+      node.importKind !== 'type' &&
+      node.moduleReference.type === 'TSExternalModuleReference'
+    ) {
+      value = node.moduleReference.expression.value
+      kind = 'require'
     } else if (node.type === 'ImportExpression') {
       value = node.source?.value
       kind = 'dynamic'
