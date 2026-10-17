@@ -114,7 +114,8 @@ export async function snapshot({
     let queue = Promise.resolve()
     const snapshot = () => (queue = queue.then(record))
     cdp.on('Debugger.paused', ({reason, data}) => {
-      if (reason !== 'EventListener' || data?.eventName !== 'listener:beforeunload') return
+      // Any other pause, such as a `debugger` statement in page code, would stop the page for good.
+      if (reason !== 'EventListener' || data?.eventName !== 'listener:beforeunload') return cdp.send('Debugger.resume').catch(() => {})
       // The initial about:blank document unloads before the first response and has nothing to record.
       if (!documents.size) return cdp.send('Debugger.resume').catch(() => {})
       snapshot()

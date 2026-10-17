@@ -124,7 +124,7 @@ Throttling changes which code runs only when the application reacts to timing (f
 
 ## Multi-page flows
 
-A full-page navigation discards the old document's scripts. The collector injects an empty `beforeunload` listener into every document and sets a debugger breakpoint on it. When a document is about to unload, the page pauses, the collector takes a coverage snapshot and reads the scripts' sources, and the page resumes. The final snapshot is taken after the actions. All snapshots go into one envelope, where a script path can appear once per snapshot; the analyzer unions them. `environment.observation` records the snapshot count.
+A full-page navigation discards the old document's scripts. The collector injects an empty `beforeunload` listener into every document and sets a debugger breakpoint on it. When a document is about to unload, the page pauses, the collector takes a coverage snapshot and reads the scripts' sources, and the page resumes. Any other debugger pause, such as a `debugger` statement in page code, is resumed at once. The final snapshot is taken after the actions. All snapshots go into one envelope, where a script path can appear once per snapshot; the analyzer unions them. `environment.observation` records the snapshot count.
 
 Limitations: the injected listener runs in every document. Code that runs after `beforeunload` (for example `pagehide` or `unload` handlers) is not recorded. A page restored from the back/forward cache without unloading keeps its scripts, so it is covered by the next snapshot. Navigations to origins other than `--url`, `--cdn-prefix`, and `--allow-origin` origins are blocked.
 

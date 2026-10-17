@@ -566,7 +566,8 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
         snapshots++
       }))
     cdp.on('Debugger.paused', ({reason, data}) => {
-      if (reason !== 'EventListener' || data?.eventName !== 'listener:beforeunload') return
+      // Any other pause, such as a `debugger` statement in page code, would stop the page for good.
+      if (reason !== 'EventListener' || data?.eventName !== 'listener:beforeunload') return cdp.send('Debugger.resume').catch(() => {})
       snapshot()
         .catch((error) => failures.push(error))
         .finally(() => cdp.send('Debugger.resume').catch(() => {}))

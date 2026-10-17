@@ -16,8 +16,22 @@ const binary = join(root, 'target', 'debug', 'coldpath')
 execFileSync('cargo', ['build', '--locked'], {cwd: root, stdio: 'inherit'})
 const source = await readFile(join(fixture, 'entry.js'), 'utf8')
 let servedSource = source
+// Scripts served under /site/ from artifacts/collector/site, each loaded by /site/NAME.html.
+const site = join(artifacts, 'site')
+const siteScripts: Record<string, string> = {
+  // A `debugger` statement must not stop the page (#67).
+  'debugger.js': 'function afterDebugger(){return 1}\nsetTimeout(() => { debugger; window.done = afterDebugger() }, 200)\n',
+}
+await mkdir(site, {recursive: true})
+for (const [name, text] of Object.entries(siteScripts)) await writeFile(join(site, name), text)
 const server = createServer((request, response) => {
-  if (request.url === '/assets/entry.js') {
+  if (request.url!.startsWith('/site/') && Object.hasOwn(siteScripts, request.url!.slice('/site/'.length))) {
+    response.setHeader('content-type', 'text/javascript; charset=utf-8')
+    response.end(siteScripts[request.url!.slice('/site/'.length)])
+  } else if (/^\/site\/\w+\.html$/.test(request.url!)) {
+    response.setHeader('content-type', 'text/html; charset=utf-8')
+    response.end(`<!doctype html><script src="${request.url!.replace(/html$/, 'js')}"></script>`)
+  } else if (request.url === '/assets/entry.js') {
     response.setHeader('content-type', 'text/javascript; charset=utf-8')
     response.end(servedSource)
   } else if (request.url === '/') {
@@ -134,6 +148,21 @@ try {
     [],
   )
   assert.equal(JSON.parse(await readFile(repeated, 'utf8')).run, undefined)
+
+  const siteCollect = async (name: string) => {
+    const output = join(artifacts, `${name}.coverage.json`)
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/site/${name}.html`
+    // A paused page would otherwise hang the run.
+    await run(
+      process.execPath,
+      [join(root, 'bin', 'coldpath.ts'), 'collect', '--url', url, '--dir', site, '--prefix', '/site/', '--wait-ms', '0', '--out', output],
+      {timeout: 60000},
+    )
+    return JSON.parse(await readFile(output, 'utf8'))
+  }
+  // Other debugger pauses are resumed, so collect finishes and records the code after the statement.
+  const paused = await siteCollect('debugger')
+  assert.equal(paused.scripts[0].functions.find((f: any) => f.functionName === 'afterDebugger').ranges[0].count, 1)
 
   // The browser and disk must match even when the URL still looks correct.
   servedSource = source + '\n'

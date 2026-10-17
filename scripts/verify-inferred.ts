@@ -120,6 +120,12 @@ const pages: Record<string, [string, string]> = {
   '/escape-map.html': ['text/html', '<!doctype html><script src="/e/map.js"></script>'],
   '/e/map.js': ['text/javascript', 'window.escaped=2\n//# sourceMappingURL=..%2F..%2F..%2F..%2Fescaped.js.map'],
   '/e/..%2F..%2F..%2F..%2Fescaped.js.map': ['application/json', JSON.stringify({version: 3, sources: [], names: [], mappings: ''})],
+  // A `debugger` statement must not stop the page (#67).
+  '/debugger.html': ['text/html', '<!doctype html><script src="/d/debugger.js"></script>'],
+  '/d/debugger.js': [
+    'text/javascript',
+    'function afterDebugger(){return 1}\nsetTimeout(() => { debugger; window.done = afterDebugger() }, 200)',
+  ],
 }
 const site = createServer((request, response) => {
   const page = pages[request.url!]
@@ -531,6 +537,13 @@ try {
     /cannot save http:\/\/\S+\/e\/\.\.%2F\.\.%2F\.\.%2F\.\.%2Fescaped\.js\.map:/,
   )
   assert.deepEqual(await readdir(escape), ['out'])
+  // Other debugger pauses are resumed, so the code after the statement runs and is recorded.
+  const paused = join(out, 'debugger')
+  await cli('snapshot', '--url', origin + '/debugger.html', '--out', paused, '--wait-ms', '500')
+  const pausedScript = JSON.parse(await readFile(join(paused, 'coverage.json'), 'utf8')).find((entry: {url: string}) =>
+    entry.url.endsWith('/d/debugger.js'),
+  )
+  assert.equal(pausedScript.functions.find((f: {functionName: string}) => f.functionName === 'afterDebugger').ranges[0].count, 1)
   // An installed browser by Playwright channel; an unknown channel fails in Playwright's launch.
   const channel = join(out, 'channel')
   await cli('snapshot', '--url', origin + '/', '--out', channel, '--wait-ms', '0', '--browser-channel', 'chromium')
