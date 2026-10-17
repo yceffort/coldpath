@@ -178,14 +178,25 @@ try {
       prefix: '/assets/',
       out: '.',
       waitMs: 1000,
+      // A browser option on the command line replaces this one, which does not exist.
+      browserPath: 'missing-browser',
       scenarios: [{name: 'override'}],
     }),
   )
-  await run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'collect', '--scenarios', overrideFile, '--wait-ms', '0'])
-  assert.match(
-    JSON.parse(await readFile(join(artifacts, 'override.coverage.json'), 'utf8')).environment.observation,
-    /^navigation networkidle \+ 0ms;/,
-  )
+  await run(process.execPath, [
+    join(root, 'bin', 'coldpath.ts'),
+    'collect',
+    '--scenarios',
+    overrideFile,
+    '--wait-ms',
+    '0',
+    '--browser-channel',
+    'chromium',
+  ])
+  const overridden = JSON.parse(await readFile(join(artifacts, 'override.coverage.json'), 'utf8')).environment
+  assert.match(overridden.observation, /^navigation networkidle \+ 0ms;/)
+  assert.equal(overridden.browserChannel, 'chromium')
+  assert.equal(overridden.browserPath, undefined)
   await assert.rejects(
     run(process.execPath, [join(root, 'bin', 'coldpath.ts'), 'collect', '--scenarios', overrideFile, '--out', 'x.json']),
     /--scenarios does not take --url\/--dir\/--out\/--scenario\/--actions/,

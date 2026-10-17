@@ -205,8 +205,11 @@ async function main() {
         throw new Error('--scenarios does not take --url/--dir/--out/--scenario/--actions')
       // The options given on the command line override each scenario's values.
       const overrides = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined))
+      // A browser option replaces whichever browser key the file set, as the two cannot be combined.
+      const browser =
+        options.browserPath !== undefined || options.browserChannel !== undefined ? {browserPath: undefined, browserChannel: undefined} : {}
       const {scenarios} = await loadScenarios(values.scenarios)
-      for (const scenario of scenarios) await collect({...scenario, ...overrides})
+      for (const scenario of scenarios) await collect({...scenario, ...browser, ...overrides})
       return 0
     }
     await collect(options)
