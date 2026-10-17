@@ -710,6 +710,9 @@ fn evidence_replays_offline_after_the_workspace_is_gone() {
         Command::new(env!("CARGO_BIN_EXE_coldpath"))
             .current_dir(cwd)
             .args(args)
+            // anyhow appends a backtrace to the error when either is set.
+            .env_remove("RUST_BACKTRACE")
+            .env_remove("RUST_LIB_BACKTRACE")
             .output()
             .unwrap()
     };
