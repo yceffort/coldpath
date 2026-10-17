@@ -447,6 +447,33 @@ try {
     assert(partial.length, 'answers received before the failure are written')
     assert.deepEqual(partial.sort(), limited.slice(1).sort())
     assert.equal(late, 0, 'no request starts after the failure')
+
+    // When the only request fails, there is no answer to write, so an earlier file stays as it was.
+    const earlier = await readFile(join(out, 'limited.json'), 'utf8')
+    limited.length = 0
+    await assert.rejects(
+      cli(
+        'label',
+        '--report',
+        join(out, 'report.json'),
+        '--out',
+        join(out, 'limited.json'),
+        '--provider',
+        'openai',
+        '--model',
+        'test-model',
+        '--base-url',
+        `http://127.0.0.1:${(limiter.address() as AddressInfo).port}/v1`,
+        '--top',
+        '1',
+      ),
+      (error: {code: number; stdout: string}) => {
+        assert.equal(error.code, 1)
+        assert.match(error.stdout, /0\/1 sources .*; a request failed and no answer arrived, so .*limited\.json was not written/)
+        return true
+      },
+    )
+    assert.equal(await readFile(join(out, 'limited.json'), 'utf8'), earlier, 'an earlier file is untouched')
   } finally {
     limiter.close()
   }

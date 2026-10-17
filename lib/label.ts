@@ -278,10 +278,13 @@ export async function label({
       }
     }),
   )
-  await writeFile(out, JSON.stringify({schemaVersion: 1, generator: {provider, model, mode}, sources}, null, 2) + '\n')
+  const labeled = Object.keys(sources).length
+  // A failed request before any answer leaves nothing to write, and an earlier run's file is kept.
+  const skipped = stop && !labeled
+  if (!skipped) await writeFile(out, JSON.stringify({schemaVersion: 1, generator: {provider, model, mode}, sources}, null, 2) + '\n')
   console.log(
-    `Labeled ${Object.keys(sources).length}/${targets.length} sources (${rejected} identity guesses rejected, ${failed} failed); ` +
-      `tokens in ${usage.input}, out ${usage.output} -> ${out}`,
+    `Labeled ${labeled}/${targets.length} sources (${rejected} identity guesses rejected, ${failed} failed); ` +
+      `tokens in ${usage.input}, out ${usage.output}${skipped ? `; a request failed and no answer arrived, so ${out} was not written` : ` -> ${out}`}`,
   )
   if (stop) throw new Error('stopped after a failed request; the remaining sources were not labeled')
 }
