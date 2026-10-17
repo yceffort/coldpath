@@ -27,22 +27,32 @@ const GROUP_GAP = 6,
   // Children with less area than this, in square pixels, are merged into one tile that zooms to them.
   MIN_AREA = 700
 
-// Keeps the rows, largest first, that get enough of `space` to see, and merges the rest into one "N smaller items" row.
-function visible(rows: View[], parent: TreeNode, area: Area, space: number): Pick<Tile, 'row' | 'more'>[] {
+// Keeps the rows, largest first, that get enough of a `width` by `height` area to see, and merges the rest into one
+// "N smaller items" row. `weight` is a row's share of the area: the merged row takes some from the largest row, at most
+// half of it, so that it spans the shorter side at least as thick as a MIN_AREA square instead of as a sliver.
+function visible(
+  rows: View[],
+  parent: TreeNode,
+  area: Area,
+  width: number,
+  height: number,
+): (Pick<Tile, 'row' | 'more'> & {weight: number})[] {
+  const space = width * height
   const total = rows.reduce((sum, row) => sum + row[area], 0)
   let kept = 1
   while (kept < rows.length && (rows[kept][area] / total) * space >= MIN_AREA) kept++
   const rest = rows.slice(kept)
-  if (rest.length < 2) return rows.map((row) => ({row}))
-  return [
-    ...rows.slice(0, kept).map((row) => ({row})),
-    {row: merge(rest.length + ' smaller items', parent, rest), more: {rows: rest, keys: keysUnder(parent, rest)}},
-  ]
+  if (rest.length < 2) return rows.map((row) => ({row, weight: row[area]}))
+  const items = rows.slice(0, kept).map((row) => ({row, weight: row[area]}))
+  const row = merge(rest.length + ' smaller items', parent, rest)
+  const extra = Math.min(Math.max(0, (Math.sqrt(MIN_AREA) * Math.min(width, height) * total) / space - row[area]), items[0].weight / 2)
+  items[0].weight -= extra
+  return [...items, {row, more: {rows: rest, keys: keysUnder(parent, rest)}, weight: row[area] + extra}]
 }
 
 // Squarified boxes, so that small entries become boxes rather than slivers, with `gap` pixels between them.
-function pack<T extends {row: View}>(items: T[], area: Area, x0: number, y0: number, x1: number, y1: number, gap: number) {
-  const nodes = items.map((item) => ({item, value: item.row[area], x0: 0, y0: 0, x1: 0, y1: 0}))
+function pack<T extends {weight: number}>(items: T[], x0: number, y0: number, x1: number, y1: number, gap: number) {
+  const nodes = items.map((item) => ({item, value: item.weight, x0: 0, y0: 0, x1: 0, y1: 0}))
   const parent = {value: nodes.reduce((sum, node) => sum + node.value, 0), children: nodes}
   // Every box gives up half the gap on each side, so the outer edges stay flush with the area.
   const half = gap / 2
@@ -61,15 +71,14 @@ function layout(items: View[], focus: TreeNode, area: Area, width: number, heigh
   const tiles: Tile[] = []
   if (!width || !height) return tiles
   const name = (tile: Pick<Tile, 'row' | 'more'>) => (tile.more ? 'more' : tile.row.kind + ':' + tile.row.name)
-  for (const box of pack(visible(byArea(items, area), focus, area, width * height), area, 0, 0, width, height, GROUP_GAP)) {
+  for (const box of pack(visible(byArea(items, area), focus, area, width, height), 0, 0, width, height, GROUP_GAP)) {
     const children =
       box.more || box.row.kind === 'file' || box.w < 150 || box.h < 110 ? [] : byArea([...box.row.children.values()].map(compact), area)
     const group = children.length > 1
     tiles.push({...box, key: name(box), depth: 0, group})
     if (group)
       for (const tile of pack(
-        visible(children, box.row.ref, area, box.w * (box.h - HEADER)),
-        area,
+        visible(children, box.row.ref, area, box.w, box.h - HEADER),
         box.x,
         box.y + HEADER,
         box.x + box.w,
@@ -263,7 +272,9 @@ export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area,
         {...stylex.props(styles.treemap)}
       >
         {layers}
-        {area === 'unobservedBytes' && !tiles.length && <p {...stylex.props(styles.nothing)}>Nothing here never ran.</p>}
+        {!tiles.length && (
+          <p {...stylex.props(styles.nothing)}>{area === 'unobservedBytes' ? 'Nothing here never ran.' : 'Nothing here has any bytes.'}</p>
+        )}
       </div>
       <Panel control={panel} scope={scope} coldest={coldest} paint={paint} segments={segments} onSelect={onSelect} />
     </div>

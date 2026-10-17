@@ -243,6 +243,39 @@ try {
   await page.getByRole('button', {name: 'src', exact: true}).click()
   assert.equal(await page.locator(top).count(), 2)
 
+  // Beside one file that fills the map, the merged tile still gets room to see and select, nested and at the top level.
+  const dominant = join(output, 'dominant')
+  await mkdir(dominant, {recursive: true})
+  await writeFile(join(dominant, 'one.js'), ';'.repeat(5006))
+  await writeFile(
+    join(dominant, 'one.js.map'),
+    JSON.stringify({
+      version: 3,
+      sections: ['big.ts', 'a.ts', 'b.ts', 'c.ts'].map((name, i) => ({
+        offset: {line: 0, column: i && 4998 + i * 2},
+        map: {version: 3, sources: [name], names: [], mappings: 'AAAA'},
+      })),
+    }),
+  )
+  const dominantHtml = join(output, 'dominant.html')
+  execFileSync(binary, ['--dir', dominant, '--treemap', dominantHtml], {stdio: 'pipe'})
+  // The size the layout gives the tile: its padding alone would draw it outside the map.
+  const sized = () =>
+    page.locator('.tile[data-kind="more"]').evaluate((tile) => parseFloat(tile.style.width) > 0 && parseFloat(tile.style.height) > 0)
+  await page.goto(pathToFileURL(dominantHtml).href)
+  assert(await sized(), 'the nested merged tile has a width and a height')
+  await page.locator('.tile[data-kind="more"]').click()
+  assert.equal(await page.locator('#scope').textContent(), '3 smaller items')
+  await page.getByRole('button', {name: 'one.js', exact: true}).click()
+  assert(await sized(), 'the merged tile has a width and a height')
+  await page.locator('.tile[data-kind="more"]').click()
+  assert.equal(await page.locator('#scope').textContent(), '3 smaller items')
+  // A view whose files have no bytes says so instead of drawing an empty map.
+  const emptyHtml = join(output, 'empty.html')
+  await writeFile(emptyHtml, (await readFile(dominantHtml, 'utf8')).replaceAll(/(?<="\w*[bB]ytes":)\d+/g, '0'))
+  await page.goto(pathToFileURL(emptyHtml).href)
+  assert.equal(await page.locator('#treemap').textContent(), 'Nothing here has any bytes.')
+
   // Two pnpm copies of one package shorten to the same path, but each keeps its own tile, named by its version.
   const pnpm = join(output, 'pnpm')
   await mkdir(pnpm, {recursive: true})
