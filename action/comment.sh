@@ -4,6 +4,10 @@ set -eo pipefail
 marker='<!-- coldpath-report -->'
 body="$RUNNER_TEMP/coldpath/comment.md"
 summary="$RUNNER_TEMP/coldpath/out/summary.md"
+if [ ! -f "$summary" ]; then
+  echo "::error::$summary is missing; the analysis step wrote no summary"
+  exit 1
+fi
 {
   echo "$marker"
   [ "$EXIT_CODE" = 0 ] || printf '> [!CAUTION]\n> Budget exceeded. See the failures at the end of this summary.\n\n'

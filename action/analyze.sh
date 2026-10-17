@@ -4,9 +4,12 @@ set -eo pipefail
 bin="$ANALYZER"
 out="$RUNNER_TEMP/coldpath/out"
 mkdir -p "$out"
+rm -f "$out/report.json"
 
 args=()
 while IFS= read -r line; do
+  # YAML block scalars keep trailing spaces, which would become part of the argument.
+  line="${line%"${line##*[![:space:]]}"}"
   [[ "$line" =~ ^[[:space:]]*$ ]] || args+=("$line")
 done <<< "$INPUT_ARGS"
 
@@ -34,6 +37,11 @@ code=0
 if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then
   echo "::error::coldpath analysis failed with exit code $code"
   exit "$code"
+fi
+# Budget failures write the report first; argument errors also exit 2 but before writing anything.
+if [ "$code" -eq 2 ] && [ ! -f "$out/report.json" ]; then
+  echo "::error::coldpath failed with exit code 2 (usage error)"
+  exit 2
 fi
 [ "$code" -eq 0 ] || echo "::error::coldpath budget exceeded"
 echo "exit-code=$code" >> "$GITHUB_OUTPUT"
