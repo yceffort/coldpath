@@ -1,6 +1,6 @@
 # Usage guide
 
-Run `coldpath --help` for the complete CLI and `coldpath --version` for the analyzer's version. All paths in the examples are relative to your current working directory.
+Run `coldpath --help` for the native binary's complete CLI or, with the npm package, `coldpath analyze --help` for the analyzer options, and `coldpath --version` for the analyzer's version. All paths in the examples are relative to your current working directory.
 
 ## Files, globs, and output
 
