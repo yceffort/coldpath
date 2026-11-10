@@ -271,8 +271,8 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
     if (type === 'error' || type === 'warning') state.consoleMessages.push({type, text: message.text()})
   })
   page.on('requestfailed', (request) => state.failedRequests.push({url: request.url(), reason: request.failure()?.errorText ?? 'unknown'}))
-  // The route handler sees only the first URL of a redirect chain, so the later hops are checked here.
-  page.on('request', (request) => {
+  // The route handler sees only the first URL of a redirect chain, so the later hops are checked here, on every page.
+  context.on('request', (request) => {
     let first = request.redirectedFrom()
     if (!first) return
     while (first.redirectedFrom()) first = first.redirectedFrom()!
@@ -283,9 +283,12 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   })
   // WebSockets that opened a connection. One the route above closed never does, so with routeWebSocket these are
   // ones Playwright did not route, such as those workers open, or ones a setup route connected itself.
-  page.on('websocket', (socket) => {
-    if (!allowed.has(socketOrigin(socket.url()))) sockets.push(socket.url())
-  })
+  const watchSockets = (opened: Page) =>
+    opened.on('websocket', (socket) => {
+      if (!allowed.has(socketOrigin(socket.url()))) sockets.push(socket.url())
+    })
+  watchSockets(page)
+  context.on('page', watchSockets)
   const cdp = await context.newCDPSession(page)
   if (network) {
     await cdp.send('Network.enable')

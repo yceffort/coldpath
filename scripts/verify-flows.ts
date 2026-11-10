@@ -74,6 +74,16 @@ const app = await listen(async (request, response) => {
       `<script src="/assets/first.js"></script><script>new WebSocket('${apiOrigin.replace('http', 'ws')}/socket'); fetch('/redirect').then((r) => r.text(), () => 'failed').then((text) => { document.body.append(text) })</script>`,
     )
   else if (request.url === '/redirect') response.writeHead(302, {location: `${apiOrigin}/via-redirect`}).end()
+  // The first page is clean. A popup that the actions open requests a redirect and starts a worker that opens a WebSocket.
+  else if (request.url === '/popup') html(response, '<script src="/assets/first.js"></script>')
+  else if (request.url === '/popup-page')
+    html(
+      response,
+      `<script>Promise.all([fetch('/popup-redirect').then((r) => r.text(), () => 'failed'), new Promise((resolve) => { new Worker('/popup-worker.js').onmessage = resolve })]).then(() => { globalThis.settled = true })</script>`,
+    )
+  else if (request.url === '/popup-redirect') response.writeHead(302, {location: `${apiOrigin}/via-popup`}).end()
+  else if (request.url === '/popup-worker.js')
+    script(response, `new WebSocket('${apiOrigin.replace('http', 'ws')}/popup').onclose = () => postMessage('closed')`)
   // Like a Next.js router, the page loads every script that a prefetch response names.
   else if (request.url === '/prefetch')
     html(
@@ -250,6 +260,24 @@ try {
   })
   workerSocket = false
 
+  // The redirect and WebSocket listeners cover every page of the context, so a popup cannot slip past them (#103).
+  const popup = join(artifacts, 'popup.mjs')
+  await writeFile(
+    popup,
+    `export default async function ({page}) {
+  const [opened] = await Promise.all([page.waitForEvent('popup'), page.evaluate(() => { window.open('/popup-page') })])
+  await opened.waitForFunction(() => globalThis.settled === true)
+}\n`,
+  )
+  await assert.rejects(record('popup', '/popup', ['--actions', popup]), ({message}: Error) => {
+    assert(message.includes('popup: requests reached origins outside --allow-origin and --cdn-prefix'), message)
+    assert(message.includes(`redirects reached ${apiOrigin}, which the origin policy cannot block`), message)
+    assert(message.includes(`/popup-redirect -> ${apiOrigin}/via-popup`), message)
+    assert(message.includes(`WebSockets reached ${apiOrigin}, which Playwright did not route, such as those workers open:`), message)
+    assert(message.includes(`${apiOrigin.replace('http', 'ws')}/popup`), message)
+    return true
+  })
+
   // analyze puts what the collector reported above the numbers: stderr, Markdown, and both HTML pages.
   const {stderr: analyzed} = await run(binary, [
     '--dir',
@@ -348,5 +376,5 @@ try {
   await Promise.all([app, cdn, api].map((server) => new Promise((resolve) => server.close(resolve))))
 }
 console.log(
-  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, WebSockets and redirects to unlisted origins, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors, scripts loaded only by router prefetches and stale CDN rejection.',
+  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, WebSockets and redirects to unlisted origins, also from popups, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors, scripts loaded only by router prefetches and stale CDN rejection.',
 )
