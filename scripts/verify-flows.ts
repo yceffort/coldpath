@@ -230,20 +230,42 @@ try {
   await record('error-allowed', '/error', ['--allow-page-error', '^flaky'])
   assert.deepEqual(JSON.parse(await readFile(join(artifacts, 'error-allowed.coverage.json'), 'utf8')).pageErrors, ['flaky request'])
 
+  // Playwright does not report every redirect (#110): about one run in a few thousand has none for a redirect the browser
+  // followed. A run that did not report the redirect it is checked for is therefore made again, twice at most.
+  const withRedirect = async <T>(collected: () => Promise<T>, reported: (outcome: T) => boolean) => {
+    for (let attempt = 1; ; attempt++) {
+      const outcome = await collected()
+      if (attempt === 3 || reported(outcome)) return outcome
+    }
+  }
+  // The error of a scenario that failed.
+  const failure = (collected: Promise<unknown>) =>
+    collected.then(
+      () => 'the scenario passed',
+      (error: Error) => error.message,
+    )
+
   // A WebSocket to an unlisted origin is closed before it connects and counts as aborted. A redirect has reached the
   // origin by the time the collector sees it, so it fails the scenario until the origin is allowed (#71).
-  await assert.rejects(record('escape', '/escape', []), ({message}: Error) => {
-    assert(message.includes(`escape: aborted requests to origins outside --allow-origin and --cdn-prefix: ${apiOrigin} (1)`), message)
-    assert(message.includes('escape: requests reached origins outside --allow-origin and --cdn-prefix'), message)
-    assert(message.includes(`redirects reached ${apiOrigin}, which the origin policy cannot block`), message)
-    assert(message.includes(`/redirect -> ${apiOrigin}/via-redirect`), message)
-    // The WebSocket the route closed never opened a connection, so it is not reported as one that escaped.
-    assert(!message.includes('WebSockets reached'), message)
-    return true
-  })
+  const escaped = await withRedirect(
+    () => failure(record('escape', '/escape', [])),
+    (message) => message.includes('redirects reached'),
+  )
+  assert(escaped.includes(`escape: aborted requests to origins outside --allow-origin and --cdn-prefix: ${apiOrigin} (1)`), escaped)
+  assert(escaped.includes('escape: requests reached origins outside --allow-origin and --cdn-prefix'), escaped)
+  assert(escaped.includes(`redirects reached ${apiOrigin}, which the origin policy cannot block`), escaped)
+  assert(escaped.includes(`/redirect -> ${apiOrigin}/via-redirect`), escaped)
+  // The WebSocket the route closed never opened a connection, so it is not reported as one that escaped.
+  assert(!escaped.includes('WebSockets reached'), escaped)
   assert.equal(upgrades, 0)
-  await record('escape-allowed', '/escape', ['--allow-origin', apiOrigin, '--expect', 'text=pong'])
-  const escapeAllowed = JSON.parse(await readFile(join(artifacts, 'escape-allowed.coverage.json'), 'utf8'))
+  const escapeAllowed = await withRedirect(
+    async () => {
+      upgrades = 0
+      await record('escape-allowed', '/escape', ['--allow-origin', apiOrigin, '--expect', 'text=pong'])
+      return JSON.parse(await readFile(join(artifacts, 'escape-allowed.coverage.json'), 'utf8'))
+    },
+    ({requests}) => requests.some((r: any) => r.path === `${apiOrigin}/via-redirect`),
+  )
   assert.equal(upgrades, 1)
   assert.deepEqual(escapeAllowed.blockedOrigins, [])
   assert(
@@ -269,14 +291,15 @@ try {
   await opened.waitForFunction(() => globalThis.settled === true)
 }\n`,
   )
-  await assert.rejects(record('popup', '/popup', ['--actions', popup]), ({message}: Error) => {
-    assert(message.includes('popup: requests reached origins outside --allow-origin and --cdn-prefix'), message)
-    assert(message.includes(`redirects reached ${apiOrigin}, which the origin policy cannot block`), message)
-    assert(message.includes(`/popup-redirect -> ${apiOrigin}/via-popup`), message)
-    assert(message.includes(`WebSockets reached ${apiOrigin}, which Playwright did not route, such as those workers open:`), message)
-    assert(message.includes(`${apiOrigin.replace('http', 'ws')}/popup`), message)
-    return true
-  })
+  const popped = await withRedirect(
+    () => failure(record('popup', '/popup', ['--actions', popup])),
+    (message) => message.includes('redirects reached'),
+  )
+  assert(popped.includes('popup: requests reached origins outside --allow-origin and --cdn-prefix'), popped)
+  assert(popped.includes(`redirects reached ${apiOrigin}, which the origin policy cannot block`), popped)
+  assert(popped.includes(`/popup-redirect -> ${apiOrigin}/via-popup`), popped)
+  assert(popped.includes(`WebSockets reached ${apiOrigin}, which Playwright did not route, such as those workers open:`), popped)
+  assert(popped.includes(`${apiOrigin.replace('http', 'ws')}/popup`), popped)
 
   // analyze puts what the collector reported above the numbers: stderr, Markdown, and both HTML pages.
   const {stderr: analyzed} = await run(binary, [
