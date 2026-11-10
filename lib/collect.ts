@@ -308,11 +308,16 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   watchSockets(page)
   context.on('page', (opened) => {
     watchSockets(opened)
-    // A page that has closed again has nothing left to watch.
     context
       .newCDPSession(opened)
       .then(watchRedirects)
-      .catch(() => {})
+      .catch((error: Error) => {
+        // A page that has closed again has nothing left to watch.
+        if (!opened.isClosed())
+          console.warn(
+            `${setup.scenario}: no DevTools session on ${opened.url()}, so only Playwright reports its redirects: ${error.message.split('\n')[0]}`,
+          )
+      })
   })
   const cdp = await context.newCDPSession(page)
   await watchRedirects(cdp)
