@@ -51,8 +51,11 @@ export function App({report}: {report: Report}) {
     addEventListener('popstate', listener)
     return () => removeEventListener('popstate', listener)
   }, [])
-  // Changing what the tree holds starts again at the root.
-  const reset = () => setLocation((location) => ({path: [], only: null, zoom: location.zoom}))
+  // Changing what the tree holds starts again at the root, which replaces the current history entry.
+  const reset = () => {
+    history.replaceState({coldpath: [], only: null}, '')
+    setLocation((location) => ({path: [], only: null, zoom: location.zoom}))
+  }
   function choose(id: 'scenario' | 'initial' | 'color', value: string) {
     let next = {scenario, initial, color}
     next = {...next, [id]: value}
