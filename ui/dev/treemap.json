@@ -249,7 +249,9 @@
     }
   ],
   "warnings": [],
-  "recordingWarnings": [],
+  "recordingWarnings": [
+    "initial: the collector aborted requests to https://analytics.example because they are not --allow-origin or --cdn-prefix origins, so the recording shows the page without those responses"
+  ],
   "excludedBundles": [],
   "budgetFailures": [],
   "compression": null,

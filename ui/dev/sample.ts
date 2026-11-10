@@ -9,6 +9,9 @@ import {fileURLToPath} from 'node:url'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const example = join(root, 'examples/recorded')
 const work = await mkdtemp(join(tmpdir(), 'coldpath-ui-sample-'))
+// The recorded example gives the collector nothing to warn about, so the payloads get one warning that RecordingWarnings can show.
+const warning =
+  'initial: the collector aborted requests to https://analytics.example because they are not --allow-origin or --cdn-prefix origins, so the recording shows the page without those responses'
 try {
   execFileSync(
     'cargo',
@@ -37,10 +40,14 @@ try {
   const report = await readFile(join(work, 'report.html'), 'utf8')
   const payloads = report.match(/<script type="application\/json" data-encoding="[^"]*" id="[^"]*">[^<]*<\/script>\n/g)
   if (!payloads) throw new Error('no payloads in the report page')
-  await writeFile(new URL('report-payloads.html', import.meta.url), payloads.join(''))
+  await writeFile(
+    new URL('report-payloads.html', import.meta.url),
+    payloads.join('').replace('"recordingWarnings":[]', `"recordingWarnings":[${JSON.stringify(warning)}]`),
+  )
   const treemap = await readFile(join(work, 'treemap.html'), 'utf8')
   const data = JSON.parse(treemap.match(/<script type="application\/json" id="report-data">([^<]*)<\/script>/)![1])
   delete data.inspectorHtml
+  data.recordingWarnings = [warning]
   await writeFile(new URL('treemap.json', import.meta.url), JSON.stringify(data, null, 2) + '\n')
 } finally {
   await rm(work, {recursive: true, force: true})
