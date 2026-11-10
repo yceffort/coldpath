@@ -3,6 +3,7 @@ import {useState} from 'react'
 import type {Counts, Recommendation, Report} from '../types.ts'
 import {actionLabels, loaded, phaseColor, shortPath, size} from './format.ts'
 import {KEYS} from './model.ts'
+import type {Exact} from './model.ts'
 import {shared} from './styles.ts'
 
 export function Summary({report, onShowUnloaded}: {report: Report; onShowUnloaded: () => void}) {
@@ -66,11 +67,11 @@ interface Finding {
   value: string
   detail: string
   share?: number
-  query: string
+  select: Exact
 }
 
 // Packages that mostly sat idle, application code that ran only after an action, and sources shipped more than once.
-export function Findings({report, onSearch}: {report: Report; onSearch: (query: string) => void}) {
+export function Findings({report, onSelect}: {report: Report; onSelect: (exact: Exact) => void}) {
   // Duplication does not depend on recordings.
   const duplicates: Finding[] = [...(report.duplicateSources || [])]
     .sort((a, b) => b.duplicates.extraBytes - a.duplicates.extraBytes)
@@ -81,7 +82,7 @@ export function Findings({report, onSearch}: {report: Report; onSearch: (query: 
         name: row.label?.shortName ? '≈ ' + row.label.shortName + ' (' + path.split('/').pop() + ')' : path.split('/').pop()!,
         value: size(row.duplicates.extraBytes) + ' extra',
         detail: row.duplicates.bundles + ' copies, ' + size(row.bytes) + ' in total: ' + path,
-        query: path,
+        select: {key: 'source', value: row.source},
       }
     })
   let idle: Finding[] = [],
@@ -114,7 +115,7 @@ export function Findings({report, onSearch}: {report: Report; onSearch: (query: 
           value: Math.round((1 - ran) * 100) + '% never ran',
           detail: size(loaded(row)) + ' loaded, ' + size(row.observedBytes) + ' ran',
           share: ran,
-          query: row.name === '[application]' ? '' : row.name,
+          select: {key: 'package', value: row.name},
         }
       })
     // Application sources whose bytes first ran in a later recording.
@@ -135,8 +136,8 @@ export function Findings({report, onSearch}: {report: Report; onSearch: (query: 
         return {
           name: path.split('/').pop()!,
           value: size(row.bytes),
-          detail: 'Runs only in "' + row.scenario + '": ' + path,
-          query: path.split('/').pop()!,
+          detail: size(row.bytes) + ' run only in "' + row.scenario + '": ' + path,
+          select: {key: 'source', value: source},
         }
       })
   }
@@ -147,7 +148,7 @@ export function Findings({report, onSearch}: {report: Report; onSearch: (query: 
       <ol id={id + '-list'} {...stylex.props(styles.rows)}>
         {rows.map((row, index) => (
           <li key={index}>
-            <button onClick={() => onSearch(row.query)} {...stylex.props(stylex.defaultMarker(), styles.row, !index && styles.firstRow)}>
+            <button onClick={() => onSelect(row.select)} {...stylex.props(stylex.defaultMarker(), styles.row, !index && styles.firstRow)}>
               <strong {...stylex.props(styles.rowTitle)}>{row.name}</strong>
               <span {...stylex.props(styles.value)}>{row.value}</span>
               {row.share !== undefined && (

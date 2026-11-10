@@ -4,9 +4,9 @@ import {RecordingWarnings} from '../RecordingWarnings.tsx'
 import type {Report} from '../types.ts'
 import {FileDetails} from './FileDetails.tsx'
 import {Actions, Findings, Summary} from './Findings.tsx'
-import {loadText, number, phaseColor, signed, size} from './format.ts'
+import {loadText, number, phaseColor, shortPath, signed, size} from './format.ts'
 import {KEYS, build, coldest, compact, filtered, keyPath, merge, resolve} from './model.ts'
-import type {Area, TreeNode, View} from './model.ts'
+import type {Area, Exact, TreeNode, View} from './model.ts'
 import {shared} from './styles.ts'
 import {Treemap} from './Treemap.tsx'
 
@@ -15,6 +15,7 @@ export type Segment = [bytes: number, color: string, label: string]
 
 export function App({report}: {report: Report}) {
   const [search, setSearch] = useState('')
+  const [exact, setExact] = useState<Exact | null>(null)
   const [group, setGroup] = useState('path')
   const [color, setColor] = useState<ColorMode>('coverage')
   const [area, setArea] = useState<Area>('bytes')
@@ -149,7 +150,7 @@ export function App({report}: {report: Report}) {
     )
   }
 
-  const view = filtered(focus, {search, mapped, unloaded, recorded: report.scenarios.length > 0})
+  const view = filtered(focus, {search, exact, mapped, unloaded, recorded: report.scenarios.length > 0})
   const only = location.only && new Set(location.only)
   const items = view
     ? focus.kind === 'file'
@@ -201,8 +202,10 @@ export function App({report}: {report: Report}) {
       <RecordingWarnings warnings={report.recordingWarnings} />
       <Findings
         report={report}
-        onSearch={(query) => {
-          setSearch(query)
+        onSelect={(target) => {
+          setSearch(target.key === 'source' ? shortPath(target.value) : target.value)
+          setExact(target)
+          reset()
           scrollToExplorer.current = true
         }}
       />
@@ -214,6 +217,7 @@ export function App({report}: {report: Report}) {
           const target = find(root)
           if (target) {
             setSearch('')
+            setExact(null)
             select(target)
             scrollToExplorer.current = true
           }
@@ -224,10 +228,13 @@ export function App({report}: {report: Report}) {
           <input
             id="search"
             type="search"
-            aria-label="Search sources or packages"
-            placeholder="Search sources or packages"
+            aria-label="Search paths, packages or labels"
+            placeholder="Search paths, packages or labels"
             value={search}
-            onInput={(event) => setSearch(event.currentTarget.value)}
+            onInput={(event) => {
+              setSearch(event.currentTarget.value)
+              setExact(null)
+            }}
             {...stylex.props(styles.search)}
           />
           <label {...stylex.props(styles.label)}>

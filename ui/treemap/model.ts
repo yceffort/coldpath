@@ -173,8 +173,15 @@ export function build(report: Report, {group, scenario, initial}: {group: string
   return {root, changes}
 }
 
+// A source or package that a findings card selects: files match it exactly instead of matching `search` as text.
+export interface Exact {
+  key: 'source' | 'package'
+  value: string
+}
+
 export interface Filters {
   search: string
+  exact: Exact | null
   mapped: boolean
   // Bundles no recording loaded are hidden unless this is set.
   unloaded: boolean
@@ -184,7 +191,8 @@ export interface Filters {
 export function filtered(node: TreeNode, filters: Filters): View | null {
   if (node.kind === 'bundle' && filters.recorded && !filters.unloaded && !loaded(node)) return null
   if (node.kind === 'file')
-    return (!filters.mapped || node.source !== '[unmapped]') && node.search!.includes(filters.search.toLowerCase())
+    return (!filters.mapped || node.source !== '[unmapped]') &&
+      (filters.exact ? node[filters.exact.key] === filters.exact.value : node.search!.includes(filters.search.toLowerCase()))
       ? ({...node, ref: node} as View)
       : null
   const result: View = {...node, ref: node, children: new Map(), ...zero(node.first.length)}

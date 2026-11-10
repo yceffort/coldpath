@@ -167,6 +167,17 @@ try {
   await page.setViewportSize({width: 390, height: 844})
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   assert.deepEqual(await overflowing(page), [])
+  // The search box's placeholder says what the search matches, and is not cut off on a phone.
+  const [placeholder, box] = await page.getByRole('searchbox').evaluate((input: HTMLInputElement) => {
+    const style = getComputedStyle(input)
+    const context = document.createElement('canvas').getContext('2d')!
+    context.font = style.font
+    return [
+      context.measureText(input.placeholder).width,
+      input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+    ]
+  })
+  assert(placeholder <= box, `the search placeholder is ${placeholder}px wide in a ${box}px box`)
   await page.screenshot({path: join(output, 'mobile.png'), fullPage: true})
   await page.emulateMedia({colorScheme: 'dark'})
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
@@ -378,8 +389,87 @@ try {
   await page.goto(pathToFileURL(sharedHtml).href)
   assert(await page.locator('#duplicate-finding').isVisible())
   assert.match((await page.locator('#duplicate-list').textContent())!, /shared\.ts.*20 B extra.*2 copies, 50 B in total/)
+  await page.locator('#duplicate-list button').click()
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
+    'a.js, 30 bytes',
+    'b.js, 20 bytes',
+  ])
   await page.goto(pathToFileURL(html).href)
   assert(await page.locator('#duplicate-finding').isHidden(), 'no finding without duplicates')
+
+  // A findings card selects its package or source itself in every bundle, from the root, instead of searching for its name
+  // in the current view: react's card leaves out react-dom and src/react-utils.ts, and the card of src/features/a/index.js
+  // leaves out the packages' index.js files. Typing in the search box still matches text.
+  const findings = join(output, 'findings')
+  await mkdir(findings, {recursive: true})
+  await writeFile(join(findings, 'app.js'), ';'.repeat(2600))
+  await writeFile(
+    join(findings, 'app.js.map'),
+    JSON.stringify({
+      version: 3,
+      sections: ['node_modules/react/index.js', 'node_modules/react-dom/index.js', 'src/react-utils.ts', 'src/features/a/index.js'].map(
+        (name, i) => ({
+          offset: {line: 0, column: [0, 1200, 2400, 2500][i]},
+          map: {version: 3, sources: [name], names: [], mappings: 'AAAA'},
+        }),
+      ),
+    }),
+  )
+  const ran = (ranges: number[][]) =>
+    JSON.stringify([{url: 'app.js', text: ';'.repeat(2600), ranges: ranges.map(([start, end]) => ({start, end}))}])
+  await writeFile(
+    join(output, 'initial.json'),
+    ran([
+      [0, 100],
+      [1200, 1300],
+      [2400, 2500],
+    ]),
+  )
+  await writeFile(
+    join(output, 'click.json'),
+    ran([
+      [0, 100],
+      [1200, 1300],
+      [2400, 2600],
+    ]),
+  )
+  const findingsHtml = join(output, 'findings.html')
+  execFileSync(
+    binary,
+    [
+      '--dir',
+      findings,
+      '--coverage',
+      join(output, 'initial.json'),
+      '--coverage',
+      join(output, 'click.json'),
+      '--initial-scenario',
+      'initial.json',
+      '--treemap',
+      findingsHtml,
+    ],
+    {stdio: 'pipe'},
+  )
+  await page.goto(pathToFileURL(findingsHtml).href)
+  assert.equal(await page.getByRole('searchbox').getAttribute('placeholder'), 'Search paths, packages or labels')
+  assert.match(
+    await page.locator('#later-list').innerText(),
+    /index\.js\s+100 B\s+100 B run only in "click\.json": src\/features\/a\/index\.js/,
+  )
+  await page.getByRole('button', {name: 'app.js', exact: true}).click()
+  await page.getByRole('button', {name: 'src', exact: true}).click()
+  await page
+    .locator('#unused-list button')
+    .filter({has: page.getByText('react', {exact: true})})
+    .click()
+  assert.equal(await page.locator('#scope').textContent(), 'All bundles')
+  assert.deepEqual(await page.evaluate(() => history.state), {coldpath: [], only: null})
+  assert.equal(await page.getByRole('searchbox').inputValue(), 'react')
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 1,200 bytes'])
+  await page.locator('#later-list button').click()
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 100 bytes'])
+  await page.getByRole('searchbox').fill('index.js')
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 2,500 bytes'])
 
   // Source-map names are data even when they contain a script closing tag.
   const hostile = '</script><script>globalThis.injected=true</script>'

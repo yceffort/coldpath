@@ -107,8 +107,8 @@ try {
   })
   await page.goto(pathToFileURL(html).href)
   assert.match((await page.locator('#headline').textContent())!, /loaded 20 B of JavaScript\. 4 B \(20%\) of it never ran/)
-  assert.match(await page.locator('#later-list').innerText(), /later\.ts\s+4 B\s+Runs only in "interaction\.json": src\/later\.ts/)
-  assert.match(await page.locator('#later-list').innerText(), /mixed\.ts\s+2 B\s+Runs only in "search\.json"/)
+  assert.match(await page.locator('#later-list').innerText(), /later\.ts\s+4 B\s+4 B run only in "interaction\.json": src\/later\.ts/)
+  assert.match(await page.locator('#later-list').innerText(), /mixed\.ts\s+2 B\s+2 B run only in "search\.json"/)
   await page.getByRole('button', {name: 'Show them'}).click()
   // Reports open in Coverage, even with several scenarios. First observed scenario colors each tile by its largest part.
   assert.equal(await page.getByLabel('Color tiles by').inputValue(), 'coverage')
