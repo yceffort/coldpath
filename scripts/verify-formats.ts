@@ -97,6 +97,7 @@ try {
     )
   await page.locator('#map-details > summary').click()
   for (const {shown, fits} of await mapLabels()) assert.equal(shown, fits)
+  assert.equal(await page.getByRole('group', {name: 'Size treemap'}).count(), 1)
   await page.getByRole('button', {name: '../../fixtures/feature.js', exact: true}).click()
   for (const {shown, fits} of await mapLabels()) assert.equal(shown, fits)
   await page.locator('#map-details > summary').click()
@@ -191,6 +192,29 @@ try {
   assert.equal(await page.locator('#generated mark.active').textContent(), 'abcdef🔥')
   assert.deepEqual(errors, [])
   summary.checks.push('HTML inspector lists rejected mappings per source and focuses their generated region')
+
+  // Files too small for the size map share one tile, an image named by their count and size.
+  const restDir = join(artifacts, 'rest')
+  await mkdir(restDir, {recursive: true})
+  await writeFile(join(restDir, 'app.js'), ';'.repeat(1000))
+  await writeFile(
+    join(restDir, 'app.js.map'),
+    JSON.stringify({
+      version: 3,
+      sections: ['big.ts', 'tiny.ts'].map((name, i) => ({
+        offset: {line: 0, column: i * 990},
+        map: {version: 3, sources: [name], names: [], mappings: 'AAAA'},
+      })),
+    }),
+  )
+  const restHtml = join(artifacts, 'rest.html')
+  execFileSync(binary, ['--dir', restDir, '--html', restHtml], {stdio: 'pipe'})
+  await page.goto(pathToFileURL(restHtml).href)
+  await page.getByRole('button', {name: 'app.js', exact: true}).click()
+  await page.locator('#map-details > summary').click()
+  await page.locator('#treemap > *').first().waitFor()
+  assert.equal(await page.getByRole('img', {name: '1 other files · 10 B', exact: true}).count(), 1)
+  summary.checks.push('HTML size map is a named group, and its tile of small files a named image')
   await writeFile(
     join(hostileDir, 'app.js.map'),
     JSON.stringify({

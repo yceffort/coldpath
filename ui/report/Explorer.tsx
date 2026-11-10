@@ -268,7 +268,7 @@ function SizeMap({rows, onSelect}: {rows: Row[]; onSelect: (index: number) => vo
           </span>
         ))}
       </div>
-      <div id="treemap" aria-label="Size treemap" ref={box?.ref ?? undefined} {...stylex.props(styles.treemap)}>
+      <div id="treemap" role="group" aria-label="Size treemap" ref={box?.ref ?? undefined} {...stylex.props(styles.treemap)}>
         {tiles.map(({row, x, y, w, h}) => {
           const Tag = row.rest ? 'div' : 'button'
           const title = row.name + ' · ' + number(row.bytes) + ' B'
@@ -276,6 +276,7 @@ function SizeMap({rows, onSelect}: {rows: Row[]; onSelect: (index: number) => vo
             <Tag
               key={row.rest ? 'rest' : row.index}
               title={title}
+              role={row.rest ? 'img' : undefined}
               aria-label={title}
               style={{left: x + '%', top: y + '%', width: w + '%', height: h + '%', background: color(row)}}
               onClick={row.rest ? undefined : () => onSelect(row.index!)}

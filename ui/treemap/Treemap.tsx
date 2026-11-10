@@ -129,10 +129,13 @@ interface Props {
   changing: boolean
   paint: (row: View) => [fill: string, ink: string]
   segments: (row: View) => Segment[]
+  // Where keyboard focus goes when a zoom leaves no tile to move it to, as when it opens a file.
+  fallback: RefObject<HTMLElement | null>
   onSelect: (node: TreeNode, only?: string[]) => void
 }
 
-export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area, changing, paint, segments, onSelect}: Props) {
+export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area, changing, paint, segments, fallback, onSelect}: Props) {
+  const frameRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<HTMLDivElement>(null)
   const layerRef = useRef<HTMLDivElement>(null)
   const leavingRef = useRef<HTMLDivElement>(null)
@@ -162,6 +165,16 @@ export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area,
   // the view back into its tile. The old view stays drawn until the motion ends, and labels wait for it.
   const [leaving, setLeaving] = useState<{zoom: number; tiles: Tile[]; rect: Rect; inward: boolean} | null>(null)
   const previous = useRef({zoom, focus, only, tiles, shown: !hidden})
+  // The view that a zoom left, while focus that was in the map, its panel or `fallback` as the zoom began waits to move into
+  // the new view, since the zoom removes the tile that had it. `keyboard` is whether that focus was shown, as after a key press.
+  const refocus = useRef<{view: typeof previous.current; keyboard: boolean} | null>(null)
+  if (zoom !== previous.current.zoom) {
+    const active = document.activeElement!
+    refocus.current =
+      frameRef.current!.contains(active) || active === fallback.current
+        ? {view: previous.current, keyboard: active.matches(':focus-visible')}
+        : null
+  }
   useLayoutEffect(() => {
     panel.current?.show(null)
     setLeaving(null)
@@ -172,6 +185,20 @@ export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area,
     if (rect) setLeaving({zoom: before.zoom, tiles: before.tiles, rect, inward: Boolean(into)})
     else layerRef.current!.animate([{opacity: 0.3}, {opacity: 1}], {duration: 180, easing: 'ease-out'})
   }, [zoom])
+  // Once the new view is laid out (a map that was hidden is measured first), focus lands on the tile that a zoom out left,
+  // and otherwise on the first tile or `fallback`.
+  useLayoutEffect(() => {
+    const before = refocus.current
+    if (!before || (!hidden && !frame.width)) return
+    refocus.current = null
+    const left = smallest(tiles, before.view.focus, before.view.only),
+      buttons = layerRef.current!.children as HTMLCollectionOf<HTMLElement>
+    const target = (left && buttons[tiles.indexOf(left)]) || buttons[0] || fallback.current
+    // Focus that a pointer zoom moves is not shown, so the page does not scroll to it.
+    target?.focus({preventScroll: !before.keyboard})
+    // The panel follows keyboard focus, but after a pointer zoom it shows the new view.
+    if (!target?.matches(':focus-visible')) panel.current?.show(null)
+  })
   useLayoutEffect(() => {
     previous.current = {zoom, focus, only, tiles, shown: !hidden}
   })
@@ -214,7 +241,6 @@ export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area,
         key={key}
         type="button"
         data-depth={depth}
-        tabIndex={depth ? -1 : undefined}
         data-bytes={row.bytes}
         data-interaction-only={row.interactionOnly}
         data-initial-unknown={row.initialUnknown}
@@ -223,7 +249,7 @@ export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area,
         data-change={row.change?.change || ''}
         data-kind={more ? 'more' : row.kind}
         style={{left: x, top: y, width: w, height: group ? HEADER : h, background, color}}
-        aria-label={row.name + ', ' + number(row.bytes) + ' bytes'}
+        aria-label={row.name + ', ' + number(row.bytes) + ' bytes' + (share(row) ? ', ' + share(row) : '')}
         onPointerEnter={() => panel.current?.show(tile)}
         onFocus={() => panel.current?.show(tile)}
         onClick={() => onSelect(row.ref, more?.keys)}
@@ -256,18 +282,20 @@ export function Treemap({items, focus, only, scope, coldest, hidden, zoom, area,
     </div>
   )
   const current = layer(tiles, zoom, leaving ? 'entering' : undefined)
-  // The view that grows or shrinks into its tile is drawn on top.
+  // The view that grows or shrinks into its tile is drawn on top. Both are always in one keyed list, so that the current
+  // view, which may hold keyboard focus, is not drawn again when the old one comes or goes.
   const layers = leaving
     ? leaving.inward
       ? [layer(leaving.tiles, leaving.zoom, 'leaving'), current]
       : [current, layer(leaving.tiles, leaving.zoom, 'leaving')]
-    : current
+    : [current]
 
   return (
-    <div hidden={hidden} {...stylex.props(styles.frame)}>
+    <div hidden={hidden} ref={frameRef} {...stylex.props(styles.frame)}>
       <div
         id="treemap"
         ref={mapRef}
+        role="group"
         aria-label="Bundle size treemap"
         onPointerLeave={() => panel.current?.show(null)}
         onBlur={(event) => {

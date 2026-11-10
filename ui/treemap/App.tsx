@@ -31,6 +31,7 @@ export function App({report}: {report: Report}) {
   const {root, changes} = useMemo(() => build(report, {group, scenario, initial}), [report, group, scenario, initial])
   const focus = resolve(root, location.path)
   const explorerRef = useRef<HTMLElement>(null)
+  const scopeRef = useRef<HTMLHeadingElement>(null)
   const scrollToExplorer = useRef(false)
   useLayoutEffect(() => {
     if (scrollToExplorer.current) explorerRef.current!.scrollIntoView({block: 'start'})
@@ -345,7 +346,7 @@ export function App({report}: {report: Report}) {
               </span>,
             ])}
           </nav>
-          <h2 id="scope" {...stylex.props(styles.scope)}>
+          <h2 id="scope" ref={scopeRef} tabIndex={-1} {...stylex.props(styles.scope)}>
             {scopeName}
           </h2>
           <span id="scope-count" aria-live="polite" {...stylex.props(styles.count)}>
@@ -435,6 +436,7 @@ export function App({report}: {report: Report}) {
           changing={changing}
           paint={paint}
           segments={segments}
+          fallback={scopeRef}
           onSelect={select}
         />
         <div id="file" hidden={!fileShown} {...stylex.props(styles.file)}>

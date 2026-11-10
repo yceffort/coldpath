@@ -57,6 +57,9 @@ const overflowing = (page: Page) =>
       })
       .map((tile) => tile.ariaLabel),
   )
+// The element with keyboard focus: its id, or a tile's name, or BODY when focus was lost.
+const focused = (page: Page) =>
+  page.evaluate(() => document.activeElement!.id || document.activeElement!.ariaLabel || document.activeElement!.tagName)
 const browser = await chromium.launch({headless: true})
 try {
   // Without motion a view's tiles are the only tiles on the page. The zoom motion is checked on its own below.
@@ -78,20 +81,46 @@ try {
   assert.equal(await page.locator('#rows tr').count(), 2)
   assert.equal(await page.locator(top).count(), 2)
   assert.equal(await page.locator(top).evaluateAll((tiles) => tiles.reduce((sum, tile) => sum + Number(tile.dataset.bytes), 0)), 90)
-  // Bundles with room and more than one entry show their contents inside, one level deep; selecting a nested tile zooms
-  // straight to it.
+  // Bundles with room and more than one entry show their contents inside, one level deep; Tab reaches them after the
+  // header, and selecting a nested tile zooms straight to it. A tile's name says the share that never ran, as the panel does.
+  assert.equal(await page.getByRole('group', {name: 'Bundle size treemap'}).count(), 1)
   assert.deepEqual(await page.locator('.tile.group[data-depth="0"]').evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
-    'app.js, 80 bytes',
+    'app.js, 80 bytes, 50% never ran',
   ])
   assert.equal(await page.locator('.tile.group[data-depth="1"], .tile[data-depth="2"]').count(), 0)
-  assert.equal(await page.locator('.tile[data-depth="1"]').first().getAttribute('tabindex'), '-1')
-  await page.locator('.tile[data-depth="1"][aria-label^="src,"]').click()
+  await page.locator('.tile.group[data-depth="0"]').focus()
+  await page.keyboard.press('Tab')
+  assert.equal(await focused(page), 'src, 60 bytes, 33% never ran')
+  assert.equal(await page.locator('#tile-panel h3').textContent(), 'src')
+  // A zoom moves keyboard focus that was in the map into the new view, and zooming out returns it to the tile it left. Focus
+  // elsewhere stays where it is.
+  await page.keyboard.press('Enter')
   assert.equal(await page.locator('#scope').textContent(), 'src')
+  assert.equal(await focused(page), await page.locator(top).first().getAttribute('aria-label'))
+  await page.goBack()
+  assert.equal(await focused(page), 'src, 60 bytes, 33% never ran')
+  await page.getByRole('searchbox').focus()
+  await page.goForward()
+  assert.equal(await page.locator('#scope').textContent(), 'src')
+  assert.equal(await focused(page), 'search')
+  await page.goBack()
+  // A pointer zoom moves focus too, but does not scroll the page to the tile that receives it: here the top of the map,
+  // where that tile is, is above the viewport and stays there.
+  await page.setViewportSize({width: 1440, height: 400})
+  await page.evaluate(() => scrollTo(0, scrollY + document.getElementById('treemap')!.getBoundingClientRect().top + 60))
+  const mapTop = () => page.evaluate(() => Math.round(document.getElementById('treemap')!.getBoundingClientRect().top))
+  assert.equal(await mapTop(), -60)
+  const src = (await page.locator('.tile[data-depth="1"][aria-label^="src,"]').boundingBox())!
+  await page.mouse.click(src.x + src.width / 2, src.y + src.height / 2)
+  assert.equal(await page.locator('#scope').textContent(), 'src')
+  assert.equal(await focused(page), await page.locator(top).first().getAttribute('aria-label'))
+  assert.equal(await mapTop(), -60, 'a pointer zoom must not scroll the page')
+  await page.setViewportSize({width: 1440, height: 1000})
   await page.getByRole('button', {name: 'All bundles', exact: true}).click()
   // The Area switch sizes tiles by the bytes that never ran, so lazy.js, which no recording measured, leaves the map.
   await page.getByRole('button', {name: 'Never-ran bytes'}).click()
   assert.equal(await page.getByRole('button', {name: 'Never-ran bytes'}).getAttribute('aria-pressed'), 'true')
-  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 80 bytes'])
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 80 bytes, 50% never ran'])
   assert.match((await page.locator('.tile.group').textContent())!, /^app\.js40 B never ran$/)
   await page.getByRole('button', {name: 'Loaded bytes'}).click()
   assert.equal(await page.locator(top).count(), 2)
@@ -112,6 +141,12 @@ try {
   assert.match((await panel.textContent())!, /^This viewcomponents/)
   await page.locator(top).last().focus()
   assert.match((await panel.textContent())!, /^file\d\d\.ts/)
+  // Opening a file hides the map, so focus moves to the file's name, and back returns it to the file's tile.
+  const last = await focused(page)
+  await page.keyboard.press('Enter')
+  assert.equal(await focused(page), 'scope')
+  await page.goBack()
+  assert.equal(await focused(page), last)
   await page.getByRole('button', {name: 'Never-ran bytes'}).click()
   assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.dataset.bytes)), ['2', '2', '2', '2', '2'])
   await page.getByRole('button', {name: 'Loaded bytes'}).click()
@@ -220,6 +255,16 @@ try {
   assert.match((await motion.locator('#treemap > .layer').last().getAttribute('class'))!, /\bleaving\b/)
   await motion.locator('#treemap .layer.leaving').waitFor({state: 'detached'})
   assert.equal(await motion.locator('#scope').textContent(), 'All bundles')
+  // Keyboard focus moves into the view that grows in and stays there through the motion.
+  await motion.locator('.tile[data-depth="1"][aria-label^="src,"]').focus()
+  await motion.keyboard.press('Enter')
+  await motion.locator('#treemap .layer.leaving').waitFor()
+  assert(await motion.evaluate(() => document.activeElement!.closest('.layer')!.classList.contains('entering')))
+  await motion.locator('#treemap .layer.leaving').waitFor({state: 'detached'})
+  assert.equal(await focused(motion), await motion.locator(top).first().getAttribute('aria-label'))
+  await motion.goBack()
+  await motion.locator('#treemap .layer.leaving').waitFor({state: 'detached'})
+  assert.equal(await focused(motion), 'src, 60 bytes, 33% never ran')
   await motion.emulateMedia({reducedMotion: 'reduce'})
   await motion.locator('.tile[data-depth="1"][aria-label^="src,"]').click()
   assert.equal(await motion.locator('#treemap .layer').count(), 1)
@@ -465,11 +510,15 @@ try {
   assert.equal(await page.locator('#scope').textContent(), 'All bundles')
   assert.deepEqual(await page.evaluate(() => history.state), {coldpath: [], only: null})
   assert.equal(await page.getByRole('searchbox').inputValue(), 'react')
-  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 1,200 bytes'])
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
+    'app.js, 1,200 bytes, 92% never ran',
+  ])
   await page.locator('#later-list button').click()
-  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 100 bytes'])
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 100 bytes, 0% never ran'])
   await page.getByRole('searchbox').fill('index.js')
-  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 2,500 bytes'])
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
+    'app.js, 2,500 bytes, 88% never ran',
+  ])
 
   // Source-map names are data even when they contain a script closing tag.
   const hostile = '</script><script>globalThis.injected=true</script>'
