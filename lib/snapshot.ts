@@ -101,10 +101,13 @@ export async function snapshot({
       if (!requests.has(key)) requests.set(key, {initiator: initiator.type, startMs: Math.round((timestamp - origin) * 1000), documentURL})
     })
     const sources = new Map<string, string>(),
+      embedderNames = new Map<string, string>(),
       failures: unknown[] = []
     const record = async () => {
       const {result} = await cdp.send('Profiler.takePreciseCoverage')
-      for (const {scriptId, url, functions} of result) {
+      for (const {scriptId, url: reported, functions} of result) {
+        // A `//# sourceURL` comment replaces `url`; `embedderName` keeps the URL the script came from.
+        const url = embedderNames.get(scriptId) || reported
         if (!/^https?:/.test(url)) continue
         if (!sources.has(scriptId)) sources.set(scriptId, (await cdp.send('Debugger.getScriptSource', {scriptId})).scriptSource)
         entries.push({url, source: sources.get(scriptId)!, functions})
@@ -122,6 +125,8 @@ export async function snapshot({
         .catch((error) => failures.push(error))
         .finally(() => cdp.send('Debugger.resume').catch(() => {}))
     })
+    // Before Debugger.enable, which reports the scripts already parsed.
+    cdp.on('Debugger.scriptParsed', ({scriptId, embedderName}) => embedderNames.set(scriptId, embedderName ?? ''))
     await cdp.send('Debugger.enable')
     await cdp.send('DOMDebugger.setEventListenerBreakpoint', {eventName: 'beforeunload'})
     await cdp.send('Profiler.enable')

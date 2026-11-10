@@ -126,6 +126,9 @@ const pages: Record<string, [string, string]> = {
     'text/javascript',
     'function afterDebugger(){return 1}\nsetTimeout(() => { debugger; window.done = afterDebugger() }, 200)',
   ],
+  // A script renamed by a `//# sourceURL` comment is saved under the URL it was served from (#101).
+  '/renamed.html': ['text/html', '<!doctype html><script src="/r/served.js"></script>'],
+  '/r/served.js': ['text/javascript', 'window.renamed=1\n//# sourceURL=renamed-bundle.js'],
 }
 const site = createServer((request, response) => {
   const page = pages[request.url!]
@@ -571,6 +574,12 @@ try {
     entry.url.endsWith('/d/debugger.js'),
   )
   assert.equal(pausedScript.functions.find((f: {functionName: string}) => f.functionName === 'afterDebugger').ranges[0].count, 1)
+  const renamed = join(out, 'renamed')
+  await cli('snapshot', '--url', origin + '/renamed.html', '--out', renamed, '--wait-ms', '0')
+  assert.equal(await readFile(join(renamed, 'files', host, 'r', 'served.js'), 'utf8'), pages['/r/served.js'][1])
+  assert(
+    JSON.parse(await readFile(join(renamed, 'coverage.json'), 'utf8')).some((entry: {url: string}) => entry.url.endsWith('/r/served.js')),
+  )
   // An installed browser by Playwright channel; an unknown channel fails in Playwright's launch.
   const channel = join(out, 'channel')
   await cli('snapshot', '--url', origin + '/', '--out', channel, '--wait-ms', '0', '--browser-channel', 'chromium')
