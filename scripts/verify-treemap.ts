@@ -199,6 +199,20 @@ try {
   await page.getByRole('button', {name: 'app.js', exact: true}).click()
   await page.goBack()
   assert.equal(await page.locator('#scope').textContent(), 'All bundles')
+  // Back skips an entry that shows the view already on screen: after app.js, the root, a zoom and a Color change, the
+  // history ends with the root twice, and one back press from there returns to app.js (#108).
+  await page.getByRole('button', {name: 'app.js', exact: true}).click()
+  await page.getByRole('button', {name: 'All bundles', exact: true}).click()
+  await page.getByRole('button', {name: 'app.js', exact: true}).click()
+  await page.getByLabel('Color tiles by').selectOption('phases')
+  assert.equal(await page.locator('#scope').textContent(), 'All bundles')
+  await page.goBack()
+  await page
+    .locator('#scope')
+    .filter({hasText: /^app\.js$/})
+    .waitFor({timeout: 5000})
+  await page.getByLabel('Color tiles by').selectOption('coverage')
+  assert.equal(await page.locator('#scope').textContent(), 'All bundles')
   await page.getByRole('button', {name: 'app.js', exact: true}).click()
   assert.equal(await page.locator('#rows tr').count(), 2)
   await page.getByRole('button', {name: '@scope/pkg', exact: true}).click()
@@ -538,7 +552,7 @@ try {
     .filter({has: page.getByText('react', {exact: true})})
     .click()
   assert.equal(await page.locator('#scope').textContent(), 'All bundles')
-  assert.deepEqual(await page.evaluate(() => history.state), {coldpath: [], only: null})
+  assert.deepEqual(await page.evaluate(() => history.state), {coldpath: [], only: null, index: 2})
   assert.equal(await page.getByRole('searchbox').inputValue(), 'react')
   assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
     'app.js, 1,200 bytes, 92% never ran',

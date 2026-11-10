@@ -39,14 +39,24 @@ export function App({report}: {report: Report}) {
   })
 
   const zoom = (node: TreeNode, only: string[] | null) => setLocation((location) => ({path: keyPath(node), only, zoom: location.zoom + 1}))
+  // The current history entry's place among those this page pushed, which tells `popstate` the direction of travel.
+  const entry = useRef<number>(history.state?.index ?? 0)
   const select = (node: TreeNode, only?: string[]) => {
     if (node === focus && !only && !location.only) return
-    history.pushState({coldpath: keyPath(node), only: only || null}, '')
+    history.pushState({coldpath: keyPath(node), only: only || null, index: ++entry.current}, '')
     zoom(node, only || null)
   }
   const popstate = useRef<(event: PopStateEvent) => void>(null)
   popstate.current = (event) => {
-    zoom(resolve(root, event.state?.coldpath || []), event.state?.only || null)
+    const node = resolve(root, event.state?.coldpath || []),
+      only: string[] | null = event.state?.only || null,
+      index: number = event.state?.index ?? 0
+    const step = Math.sign(index - entry.current)
+    entry.current = index
+    // An entry that shows the view already on screen, as the older root does once starting over has made the entry after
+    // it the root too, is skipped by going one more step the same way.
+    if (step && node === focus && !only && !location.only) return history.go(step)
+    zoom(node, only)
   }
   useLayoutEffect(() => {
     const listener = (event: PopStateEvent) => popstate.current!(event)
@@ -55,7 +65,7 @@ export function App({report}: {report: Report}) {
   }, [])
   // Changing what the tree holds starts again at the root, which replaces the current history entry.
   const reset = () => {
-    history.replaceState({coldpath: [], only: null}, '')
+    history.replaceState({coldpath: [], only: null, index: entry.current}, '')
     setLocation((location) => ({path: [], only: null, zoom: location.zoom}))
   }
   function choose(id: 'scenario' | 'initial' | 'color', value: string) {
