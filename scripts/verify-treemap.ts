@@ -116,7 +116,15 @@ try {
   assert.equal(await focused(page), await page.locator(top).first().getAttribute('aria-label'))
   assert.equal(await mapTop(), -60, 'a pointer zoom must not scroll the page')
   await page.setViewportSize({width: 1440, height: 1000})
-  await page.getByRole('button', {name: 'All bundles', exact: true}).click()
+  // Focus on a breadcrumb moves into the view it selects, to the tile that was left, as after any zoom out (#107).
+  await page.locator('#breadcrumbs button', {hasText: 'app.js'}).focus()
+  await page.keyboard.press('Enter')
+  assert.equal(await page.locator('#scope').textContent(), 'app.js')
+  assert.equal(await focused(page), 'src, 60 bytes, 33% never ran')
+  await page.locator('#breadcrumbs button').focus()
+  await page.keyboard.press('Enter')
+  assert.equal(await page.locator('#scope').textContent(), 'All bundles')
+  assert.equal(await focused(page), 'app.js, 80 bytes, 50% never ran')
   // The Area switch sizes tiles by the bytes that never ran, so lazy.js, which no recording measured, leaves the map.
   await page.getByRole('button', {name: 'Never-ran bytes'}).click()
   assert.equal(await page.getByRole('button', {name: 'Never-ran bytes'}).getAttribute('aria-pressed'), 'true')

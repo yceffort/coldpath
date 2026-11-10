@@ -338,7 +338,15 @@ export function App({report}: {report: Report}) {
         <div {...stylex.props(styles.location)}>
           <nav id="breadcrumbs" aria-label="Location" {...stylex.props(styles.nav)}>
             {ancestors.flatMap((node, index) => [
-              <button key={'b' + index} onClick={() => select(node)} {...stylex.props(styles.crumb)}>
+              <button
+                key={'b' + index}
+                onClick={() => {
+                  // The zoom removes this breadcrumb, so its focus goes to the heading, from where the map takes it.
+                  scopeRef.current!.focus()
+                  select(node)
+                }}
+                {...stylex.props(styles.crumb)}
+              >
                 {node.name}
               </button>,
               <span key={'s' + index} aria-hidden="true" {...stylex.props(styles.sep)}>
