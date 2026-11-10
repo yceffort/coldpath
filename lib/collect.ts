@@ -271,16 +271,34 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
     if (type === 'error' || type === 'warning') state.consoleMessages.push({type, text: message.text()})
   })
   page.on('requestfailed', (request) => state.failedRequests.push({url: request.url(), reason: request.failure()?.errorText ?? 'unknown'}))
-  // The route handler sees only the first URL of a redirect chain, so the later hops are checked here, on every page.
+  // The route handler sees only the first URL of a redirect chain, so the later hops are checked here. Two sources report
+  // them, and a hop that both report counts once. Playwright's `request` event covers every frame and worker of every page,
+  // but Playwright raises none for a hop whose Fetch.requestPaused it handles before the hop's Network.requestWillBeSent
+  // (#110). Each page's own DevTools session reports every hop of that page's target once it is attached.
+  const hops = new Map<string, [number, number]>()
+  const hop = (source: 0 | 1, from: string, to: string, type: string) => {
+    const key = `${from} ${to}`
+    if (!hops.has(key)) hops.set(key, [0, 0])
+    const reported = hops.get(key)!
+    if (++reported[source] <= reported[1 - source]) return
+    const url = new URL(to)
+    if (allowed.has(url.origin)) requests.push({path: url.origin === target.origin ? url.pathname + url.search : url.href, type})
+    else redirects.push({from, to})
+  }
   context.on('request', (request) => {
     let first = request.redirectedFrom()
     if (!first) return
     while (first.redirectedFrom()) first = first.redirectedFrom()!
-    const url = new URL(request.url())
-    if (allowed.has(url.origin))
-      requests.push({path: url.origin === target.origin ? url.pathname + url.search : url.href, type: request.resourceType()})
-    else redirects.push({from: first.url(), to: request.url()})
+    hop(0, first.url(), request.url(), request.resourceType())
   })
+  const watchRedirects = async (session: CDPSession) => {
+    const first = new Map<string, string>()
+    session.on('Network.requestWillBeSent', ({requestId, request, redirectResponse, type}) => {
+      if (redirectResponse) hop(1, first.get(requestId) ?? redirectResponse.url, request.url, (type ?? 'Other').toLowerCase())
+      else first.set(requestId, request.url)
+    })
+    await session.send('Network.enable')
+  }
   // WebSockets that opened a connection. One the route above closed never does, so with routeWebSocket these are
   // ones Playwright did not route, such as those workers open, or ones a setup route connected itself.
   const watchSockets = (opened: Page) =>
@@ -288,10 +306,17 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
       if (!allowed.has(socketOrigin(socket.url()))) sockets.push(socket.url())
     })
   watchSockets(page)
-  context.on('page', watchSockets)
+  context.on('page', (opened) => {
+    watchSockets(opened)
+    // A page that has closed again has nothing left to watch.
+    context
+      .newCDPSession(opened)
+      .then(watchRedirects)
+      .catch(() => {})
+  })
   const cdp = await context.newCDPSession(page)
+  await watchRedirects(cdp)
   if (network) {
-    await cdp.send('Network.enable')
     await cdp.send('Network.emulateNetworkConditions', {
       offline: false,
       latency: network.latencyMs,
