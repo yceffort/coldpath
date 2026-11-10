@@ -239,6 +239,16 @@ try {
     [['renamed.js', '/site/renamed.js']],
   )
   assert.equal(renamed.scripts[0].functions.find((f: any) => f.functionName === 'renamed').ranges[0].count, 1)
+  // A `//# sourceURL` that names another bundle under the prefix does not replace the URL the script came from (#109).
+  siteScripts['absolute.js'] =
+    `function absolute(){return 3}\nwindow.result = absolute()\n//# sourceURL=http://127.0.0.1:${(server.address() as AddressInfo).port}/site/debugger.js\n`
+  await writeFile(join(site, 'absolute.js'), siteScripts['absolute.js'])
+  const absolute = await siteCollect('absolute')
+  assert.deepEqual(
+    absolute.scripts.map((s: any) => [s.path, new URL(s.url).pathname]),
+    [['absolute.js', '/site/absolute.js']],
+  )
+  assert.equal(absolute.scripts[0].functions.find((f: any) => f.functionName === 'absolute').ranges[0].count, 1)
 
   // The browser and disk must match even when the URL still looks correct.
   servedSource = source + '\n'

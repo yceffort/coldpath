@@ -558,7 +558,7 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
     const record = async () => {
       const {result} = await cdp.send('Profiler.takePreciseCoverage')
       for (const script of result) {
-        const url = (localPath(script.url) === null && embedderNames.get(script.scriptId)) || script.url
+        const url = embedderNames.get(script.scriptId) || script.url
         const path = localPath(url)
         if (path === null) {
           if (url) excluded.add(url)
