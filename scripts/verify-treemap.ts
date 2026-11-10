@@ -367,6 +367,28 @@ try {
   assert(await sized('.tile[aria-label^="tiny.ts,"]'), 'the single small tile has a width and a height')
   await page.locator('.tile[aria-label^="tiny.ts,"]').click()
   assert.equal(await page.locator('#scope').textContent(), 'tiny.ts')
+  // A file with just enough area to keep its own tile is not drawn as a sliver beside the large one either (#106).
+  const strip = join(output, 'strip')
+  await mkdir(strip, {recursive: true})
+  await writeFile(join(strip, 'two.js'), ';'.repeat(5012))
+  await writeFile(
+    join(strip, 'two.js.map'),
+    JSON.stringify({
+      version: 3,
+      sections: ['big.ts', 'small.ts'].map((name, i) => ({
+        offset: {line: 0, column: i * 5000},
+        map: {version: 3, sources: [name], names: [], mappings: 'AAAA'},
+      })),
+    }),
+  )
+  const stripHtml = join(output, 'strip.html')
+  execFileSync(binary, ['--dir', strip, '--treemap', stripHtml], {stdio: 'pipe'})
+  await page.goto(pathToFileURL(stripHtml).href)
+  const thinnest = () =>
+    page.locator('.tile[aria-label^="small.ts,"]').evaluate((tile) => Math.min(parseFloat(tile.style.width), parseFloat(tile.style.height)))
+  assert((await thinnest()) >= 4, `the nested small tile is ${await thinnest()}px thin`)
+  await page.getByRole('button', {name: 'two.js', exact: true}).click()
+  assert((await thinnest()) >= 4, `the small tile is ${await thinnest()}px thin`)
 
   // Two pnpm copies of one package shorten to the same path, but each keeps its own tile, named by its version.
   const pnpm = join(output, 'pnpm')

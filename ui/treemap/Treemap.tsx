@@ -25,25 +25,28 @@ const GROUP_GAP = 6,
   TILE_GAP = 2,
   HEADER = 24,
   // Children with less area than this, in square pixels, are merged into one tile that zooms to them.
-  MIN_AREA = 700
+  MIN_AREA = 700,
+  // A child with that area still joins them when its tile would be thinner than this, in pixels.
+  MIN_SIDE = 4
 
-// Keeps the rows, largest first, that get enough of a `width` by `height` area to see, and merges the rest, when there
-// are two or more, into one "N smaller items" row. `weight` is a row's share of the area: that last row, merged or not,
-// takes some from the largest row, at most half of it, so that it spans the shorter side at least as thick as a MIN_AREA
-// square instead of as a sliver.
+// Keeps the rows, largest first and at most `limit` of them, that get enough of a `width` by `height` area to see, and
+// merges the rest, when there are two or more, into one "N smaller items" row. `weight` is a row's share of the area: that
+// last row, merged or not, takes some from the largest row, at most half of it, so that it spans the shorter side at least
+// as thick as a MIN_AREA square instead of as a sliver. `kept` counts the rows before it.
 function visible(
   rows: View[],
   parent: TreeNode,
   area: Area,
   width: number,
   height: number,
-): (Pick<Tile, 'row' | 'more'> & {weight: number})[] {
+  limit: number,
+): {items: (Pick<Tile, 'row' | 'more'> & {weight: number})[]; kept: number} {
   const space = width * height
   const total = rows.reduce((sum, row) => sum + row[area], 0)
   let kept = 1
-  while (kept < rows.length && (rows[kept][area] / total) * space >= MIN_AREA) kept++
+  while (kept < Math.min(rows.length, limit) && (rows[kept][area] / total) * space >= MIN_AREA) kept++
   const rest = rows.slice(kept)
-  if (!rest.length) return rows.map((row) => ({row, weight: row[area]}))
+  if (!rest.length) return {items: rows.map((row) => ({row, weight: row[area]})), kept}
   const items = rows.slice(0, kept).map((row) => ({row, weight: row[area]}))
   const last =
     rest.length > 1
@@ -51,7 +54,7 @@ function visible(
       : {row: rest[0]}
   const extra = Math.min(Math.max(0, (Math.sqrt(MIN_AREA) * Math.min(width, height) * total) / space - last.row[area]), items[0].weight / 2)
   items[0].weight -= extra
-  return [...items, {...last, weight: last.row[area] + extra}]
+  return {items: [...items, {...last, weight: last.row[area] + extra}], kept}
 }
 
 // Squarified boxes, so that small entries become boxes rather than slivers, with `gap` pixels between them.
@@ -70,25 +73,29 @@ function pack<T extends {weight: number}>(items: T[], x0: number, y0: number, x1
   }))
 }
 
+// The boxes of `rows` in an area. Beside a much larger row, one with enough area is still drawn as a sliver along the
+// whole side, so while a kept row is thinner than MIN_SIDE the smallest kept row joins the rows that are merged.
+function arrange(rows: View[], parent: TreeNode, area: Area, x0: number, y0: number, x1: number, y1: number, gap: number) {
+  for (let limit = rows.length; ;) {
+    const {items, kept} = visible(rows, parent, area, x1 - x0, y1 - y0, limit)
+    const boxes = pack(items, x0, y0, x1, y1, gap)
+    if (kept < 2 || boxes.slice(0, kept).every((box) => Math.min(box.w, box.h) >= MIN_SIDE)) return boxes
+    limit = kept - 1
+  }
+}
+
 // One view: the focus's children, each drawn as a tile or, with room, as a group of its own children.
 function layout(items: View[], focus: TreeNode, area: Area, width: number, height: number) {
   const tiles: Tile[] = []
   if (!width || !height) return tiles
   const name = (tile: Pick<Tile, 'row' | 'more'>) => (tile.more ? 'more' : tile.row.kind + ':' + tile.row.name)
-  for (const box of pack(visible(byArea(items, area), focus, area, width, height), 0, 0, width, height, GROUP_GAP)) {
+  for (const box of arrange(byArea(items, area), focus, area, 0, 0, width, height, GROUP_GAP)) {
     const children =
       box.more || box.row.kind === 'file' || box.w < 150 || box.h < 110 ? [] : byArea([...box.row.children.values()].map(compact), area)
     const group = children.length > 1
     tiles.push({...box, key: name(box), depth: 0, group})
     if (group)
-      for (const tile of pack(
-        visible(children, box.row.ref, area, box.w, box.h - HEADER),
-        box.x,
-        box.y + HEADER,
-        box.x + box.w,
-        box.y + box.h,
-        TILE_GAP,
-      ))
+      for (const tile of arrange(children, box.row.ref, area, box.x, box.y + HEADER, box.x + box.w, box.y + box.h, TILE_GAP))
         tiles.push({...tile, key: name(box) + '/' + name(tile), depth: 1, group: false})
   }
   return tiles
