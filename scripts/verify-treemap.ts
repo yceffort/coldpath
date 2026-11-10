@@ -260,8 +260,8 @@ try {
   const dominantHtml = join(output, 'dominant.html')
   execFileSync(binary, ['--dir', dominant, '--treemap', dominantHtml], {stdio: 'pipe'})
   // The size the layout gives the tile: its padding alone would draw it outside the map.
-  const sized = () =>
-    page.locator('.tile[data-kind="more"]').evaluate((tile) => parseFloat(tile.style.width) > 0 && parseFloat(tile.style.height) > 0)
+  const sized = (tile = '.tile[data-kind="more"]') =>
+    page.locator(tile).evaluate((tile) => parseFloat(tile.style.width) > 0 && parseFloat(tile.style.height) > 0)
   await page.goto(pathToFileURL(dominantHtml).href)
   assert(await sized(), 'the nested merged tile has a width and a height')
   await page.locator('.tile[data-kind="more"]').click()
@@ -275,6 +275,28 @@ try {
   await writeFile(emptyHtml, (await readFile(dominantHtml, 'utf8')).replaceAll(/(?<="\w*[bB]ytes":)\d+/g, '0'))
   await page.goto(pathToFileURL(emptyHtml).href)
   assert.equal(await page.locator('#treemap').textContent(), 'Nothing here has any bytes.')
+  // A single file too small to see is not merged, but gets the same room beside the large one, nested and at the top level.
+  const lone = join(output, 'lone')
+  await mkdir(lone, {recursive: true})
+  await writeFile(join(lone, 'one.js'), ';'.repeat(5002))
+  await writeFile(
+    join(lone, 'one.js.map'),
+    JSON.stringify({
+      version: 3,
+      sections: ['big.ts', 'tiny.ts'].map((name, i) => ({
+        offset: {line: 0, column: i * 5000},
+        map: {version: 3, sources: [name], names: [], mappings: 'AAAA'},
+      })),
+    }),
+  )
+  const loneHtml = join(output, 'lone.html')
+  execFileSync(binary, ['--dir', lone, '--treemap', loneHtml], {stdio: 'pipe'})
+  await page.goto(pathToFileURL(loneHtml).href)
+  assert(await sized('.tile[aria-label^="tiny.ts,"]'), 'the nested single small tile has a width and a height')
+  await page.getByRole('button', {name: 'one.js', exact: true}).click()
+  assert(await sized('.tile[aria-label^="tiny.ts,"]'), 'the single small tile has a width and a height')
+  await page.locator('.tile[aria-label^="tiny.ts,"]').click()
+  assert.equal(await page.locator('#scope').textContent(), 'tiny.ts')
 
   // Two pnpm copies of one package shorten to the same path, but each keeps its own tile, named by its version.
   const pnpm = join(output, 'pnpm')

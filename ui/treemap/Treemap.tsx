@@ -27,9 +27,10 @@ const GROUP_GAP = 6,
   // Children with less area than this, in square pixels, are merged into one tile that zooms to them.
   MIN_AREA = 700
 
-// Keeps the rows, largest first, that get enough of a `width` by `height` area to see, and merges the rest into one
-// "N smaller items" row. `weight` is a row's share of the area: the merged row takes some from the largest row, at most
-// half of it, so that it spans the shorter side at least as thick as a MIN_AREA square instead of as a sliver.
+// Keeps the rows, largest first, that get enough of a `width` by `height` area to see, and merges the rest, when there
+// are two or more, into one "N smaller items" row. `weight` is a row's share of the area: that last row, merged or not,
+// takes some from the largest row, at most half of it, so that it spans the shorter side at least as thick as a MIN_AREA
+// square instead of as a sliver.
 function visible(
   rows: View[],
   parent: TreeNode,
@@ -42,12 +43,15 @@ function visible(
   let kept = 1
   while (kept < rows.length && (rows[kept][area] / total) * space >= MIN_AREA) kept++
   const rest = rows.slice(kept)
-  if (rest.length < 2) return rows.map((row) => ({row, weight: row[area]}))
+  if (!rest.length) return rows.map((row) => ({row, weight: row[area]}))
   const items = rows.slice(0, kept).map((row) => ({row, weight: row[area]}))
-  const row = merge(rest.length + ' smaller items', parent, rest)
-  const extra = Math.min(Math.max(0, (Math.sqrt(MIN_AREA) * Math.min(width, height) * total) / space - row[area]), items[0].weight / 2)
+  const last =
+    rest.length > 1
+      ? {row: merge(rest.length + ' smaller items', parent, rest), more: {rows: rest, keys: keysUnder(parent, rest)}}
+      : {row: rest[0]}
+  const extra = Math.min(Math.max(0, (Math.sqrt(MIN_AREA) * Math.min(width, height) * total) / space - last.row[area]), items[0].weight / 2)
   items[0].weight -= extra
-  return [...items, {row, more: {rows: rest, keys: keysUnder(parent, rest)}, weight: row[area] + extra}]
+  return [...items, {...last, weight: last.row[area] + extra}]
 }
 
 // Squarified boxes, so that small entries become boxes rather than slivers, with `gap` pixels between them.
