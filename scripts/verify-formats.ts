@@ -145,6 +145,31 @@ try {
   await page.screenshot({path: join(artifacts, 'mobile.png'), fullPage: true})
   await page.getByRole('button', {name: '← All chunks'}).click()
   assert.equal(await page.locator('#rows tr').count(), 1)
+  // Each selection is a history entry named in the URL hash, so Back and Forward walk through them, and a reload opens the
+  // same chunk and source. A hash that names what this report does not have opens the list of chunks (#97).
+  const shown = async () => [
+    await page.locator('#explorer-title').textContent(),
+    await page.locator('#inspector').isVisible(),
+    await page.evaluate(() => location.hash),
+  ]
+  const feature = ['Source files', true, '#bundle=entry.js&source=..%2F..%2Ffixtures%2Ffeature.js']
+  assert.deepEqual(await shown(), ['Explore chunks', false, ''])
+  await page.goBack()
+  await page.locator('#source-title').filter({hasText: 'feature.js'}).waitFor()
+  assert.deepEqual(await shown(), feature)
+  await page.goBack()
+  assert.deepEqual(await shown(), ['Source files', false, '#bundle=entry.js'])
+  await page.goForward()
+  await page.reload()
+  await page.locator('#source-title').filter({hasText: 'feature.js'}).waitFor()
+  assert.deepEqual(await shown(), feature)
+  await page.goto(pathToFileURL(htmlPath).href + '#bundle=other.js&source=feature.js')
+  assert.deepEqual(await shown(), ['Explore chunks', false, ''])
+  // In a frame that another page fills from a string the report may not rewrite its URL. It still opens and selects.
+  await page.setContent('<iframe style="width: 1200px; height: 800px"></iframe>')
+  await page.locator('iframe').evaluate((frame: HTMLIFrameElement, text) => (frame.srcdoc = text), await readFile(htmlPath, 'utf8'))
+  await page.frameLocator('iframe').getByRole('button', {name: 'entry.js', exact: true}).click()
+  await page.frameLocator('iframe').getByRole('button', {name: '../../fixtures/feature.js', exact: true}).waitFor()
   assert.deepEqual(errors, [])
   assert.deepEqual(requests, [])
   summary.checks.push(
@@ -164,6 +189,10 @@ try {
   await page.getByRole('button', {name: 'Inspect chunk', exact: true}).click()
   await page.waitForFunction(() => document.getElementById('inspector')!.getAttribute('aria-busy') === 'false')
   assert.equal(await page.evaluate(() => globalThis.injected), undefined)
+  assert.equal(await page.locator('#generated').textContent(), hostile)
+  assert.equal(await page.evaluate(() => location.hash), '#bundle=app.js&inspect=chunk')
+  await page.reload()
+  await page.waitForFunction(() => document.getElementById('inspector')!.getAttribute('aria-busy') === 'false')
   assert.equal(await page.locator('#generated').textContent(), hostile)
   assert.deepEqual(errors, [])
   summary.checks.push('HTML source text cannot escape embedded JSON or execute markup')

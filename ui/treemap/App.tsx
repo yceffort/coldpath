@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import {useLayoutEffect, useMemo, useRef, useState} from 'react'
 import {RecordingWarnings} from '../RecordingWarnings.tsx'
 import type {Report} from '../types.ts'
+import {writeHistory} from '../url.ts'
 import {FileDetails} from './FileDetails.tsx'
 import {Actions, Findings, Summary} from './Findings.tsx'
 import {loadText, number, phaseColor, shortPath, signed, size} from './format.ts'
@@ -13,11 +14,29 @@ import {Treemap} from './Treemap.tsx'
 type ColorMode = 'coverage' | 'phases' | 'initial' | 'changes'
 export type Segment = [bytes: number, color: string, label: string]
 
+// The view that the URL hash names, as App writes it. A value this report does not have, as in a link made from another
+// build, gives way to the default, and a zoom stops at the deepest key the report has.
+function linked(report: Report) {
+  const params = new URLSearchParams(location.hash.slice(1))
+  const color = params.get('color')
+  const key = (['source', 'package'] as const).find((key) => params.has(key))
+  const exact = key ? {key, value: params.get(key)!} : null
+  return {
+    zoom: params.getAll('zoom'),
+    only: params.getAll('only'),
+    group: params.get('group') === 'package' ? 'package' : 'path',
+    color: (color === 'phases' || color === 'initial' || (color === 'changes' && report.baseline) ? color : 'coverage') as ColorMode,
+    exact,
+    search: exact ? (exact.key === 'source' ? shortPath(exact.value) : exact.value) : params.get('search') || '',
+  }
+}
+
 export function App({report}: {report: Report}) {
-  const [search, setSearch] = useState('')
-  const [exact, setExact] = useState<Exact | null>(null)
-  const [group, setGroup] = useState('path')
-  const [color, setColor] = useState<ColorMode>('coverage')
+  const [opened] = useState(() => linked(report))
+  const [search, setSearch] = useState(opened.search)
+  const [exact, setExact] = useState<Exact | null>(opened.exact)
+  const [group, setGroup] = useState(opened.group)
+  const [color, setColor] = useState<ColorMode>(opened.color)
   const [area, setArea] = useState<Area>('bytes')
   const [unloaded, setUnloaded] = useState(false)
   const [mapped, setMapped] = useState(false)
@@ -25,10 +44,14 @@ export function App({report}: {report: Report}) {
   const [scenario, setScenario] = useState('')
   const [initial, setInitial] = useState(report.initialScenario || '')
   const [optionsOpen, setOptionsOpen] = useState(false)
+  const {root, changes} = useMemo(() => build(report, {group, scenario, initial}), [report, group, scenario, initial])
   // The focused node as a key path from the root, the keys of its children that a "smaller items" view shows, and `zoom`,
   // which counts navigations, which animate.
-  const [location, setLocation] = useState({path: [] as string[], only: null as string[] | null, zoom: 0})
-  const {root, changes} = useMemo(() => build(report, {group, scenario, initial}), [report, group, scenario, initial])
+  const [location, setLocation] = useState(() => {
+    const node = resolve(root, opened.zoom),
+      only = opened.only.filter((key) => node.children.has(key))
+    return {path: keyPath(node), only: only.length ? only : null, zoom: 0}
+  })
   const focus = resolve(root, location.path)
   const explorerRef = useRef<HTMLElement>(null)
   const scopeRef = useRef<HTMLHeadingElement>(null)
@@ -39,15 +62,29 @@ export function App({report}: {report: Report}) {
   })
 
   const zoom = (node: TreeNode, only: string[] | null) => setLocation((location) => ({path: keyPath(node), only, zoom: location.zoom + 1}))
+  // The view on screen as a URL hash, which `linked` reads, without the values at their default.
+  const toHash = (path: string[], only: string[] | null) => {
+    const params = new URLSearchParams([
+      ...path.map((key) => ['zoom', key]),
+      ...(only || []).map((key) => ['only', key]),
+      ...(group === 'path' ? [] : [['group', group]]),
+      ...(color === 'coverage' ? [] : [['color', color]]),
+      ...(exact ? [[exact.key, exact.value]] : search ? [['search', search]] : []),
+    ]).toString()
+    return params && '#' + params
+  }
   // The current history entry's place among those this page pushed, which tells `popstate` the direction of travel.
   const entry = useRef<number>(history.state?.index ?? 0)
   const select = (node: TreeNode, only?: string[]) => {
     if (node === focus && !only && !location.only) return
-    history.pushState({coldpath: keyPath(node), only: only || null, index: ++entry.current}, '')
+    writeHistory('pushState', {coldpath: keyPath(node), only: only || null, index: ++entry.current}, toHash(keyPath(node), only || null))
     zoom(node, only || null)
   }
   const popstate = useRef<(event: PopStateEvent) => void>(null)
   popstate.current = (event) => {
+    // An entry without state is a hash the page did not write, such as a link pasted into the address bar, which opens as
+    // it does in a new tab.
+    if (!event.state) return window.location.reload()
     const node = resolve(root, event.state?.coldpath || []),
       only: string[] | null = event.state?.only || null,
       index: number = event.state?.index ?? 0
@@ -59,6 +96,8 @@ export function App({report}: {report: Report}) {
     zoom(node, only)
   }
   useLayoutEffect(() => {
+    // The entry the page opened in gets the state of its view, so that `popstate` tells it from such a hash.
+    history.replaceState({coldpath: location.path, only: location.only, index: entry.current}, '')
     const listener = (event: PopStateEvent) => popstate.current!(event)
     addEventListener('popstate', listener)
     return () => removeEventListener('popstate', listener)
@@ -68,6 +107,15 @@ export function App({report}: {report: Report}) {
     history.replaceState({coldpath: [], only: null, index: entry.current}, '')
     setLocation((location) => ({path: [], only: null, zoom: location.zoom}))
   }
+  // Every change of the view other than a zoom replaces the current entry's hash, once changes pause: browsers limit how
+  // often a page may do that, and a search changes with every key.
+  const hash = toHash(location.path, location.only)
+  useLayoutEffect(() => {
+    const timer = setTimeout(() => {
+      if (window.location.hash !== hash) writeHistory('replaceState', history.state, hash)
+    }, 300)
+    return () => clearTimeout(timer)
+  })
   function choose(id: 'scenario' | 'initial' | 'color', value: string) {
     let next = {scenario, initial, color}
     next = {...next, [id]: value}

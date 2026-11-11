@@ -334,6 +334,11 @@ try {
   assert.equal(await page.locator('#scope').textContent(), '100 smaller items')
   await page.getByRole('button', {name: 'src', exact: true}).click()
   assert.equal(await page.locator(top).count(), 2)
+  // The URL hash keeps a view of smaller items too (#97).
+  await page.locator('.tile[data-kind="more"]').click()
+  await page.reload()
+  assert.equal(await page.locator('#scope').textContent(), '100 smaller items')
+  assert.equal(await page.locator(top).count(), 100)
 
   // Beside one file that fills the map, the merged tile still gets room to see and select, nested and at the top level.
   const dominant = join(output, 'dominant')
@@ -557,12 +562,77 @@ try {
   assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
     'app.js, 1,200 bytes, 92% never ran',
   ])
+  // The URL hash keeps the card's selection rather than the text it put in the search box (#97).
+  await page.waitForFunction(() => location.hash === '#package=react')
+  await page.reload()
+  assert.equal(await page.getByRole('searchbox').inputValue(), 'react')
+  assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
+    'app.js, 1,200 bytes, 92% never ran',
+  ])
   await page.locator('#later-list button').click()
   assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), ['app.js, 100 bytes, 0% never ran'])
   await page.getByRole('searchbox').fill('index.js')
   assert.deepEqual(await page.locator(top).evaluateAll((tiles) => tiles.map((tile) => tile.ariaLabel)), [
     'app.js, 2,500 bytes, 88% never ran',
   ])
+
+  // The URL hash names the view on screen, so that a copied URL or a reload opens it again (#97). A zoom adds a history
+  // entry with its hash; grouping, color and search replace the current entry's hash once they pause, so typing adds none.
+  const hashed = (target: Page, hash: string) => target.waitForFunction((hash) => location.hash === hash, hash)
+  const view = async (target: Page) => [
+    await target.locator('#scope').textContent(),
+    await target.getByLabel('Group sources').inputValue(),
+    await target.getByLabel('Color tiles by').inputValue(),
+    await target.getByRole('searchbox').inputValue(),
+    await target.locator('#rows tr').count(),
+  ]
+  await page.goto(pathToFileURL(html).href)
+  await page.getByRole('button', {name: 'app.js', exact: true}).click()
+  assert.equal(await page.evaluate(() => location.hash), '#zoom=app.js')
+  const entries = await page.evaluate(() => history.length)
+  await page.getByLabel('Group sources').selectOption('package')
+  await page.getByLabel('Color tiles by').selectOption('phases')
+  await hashed(page, '#group=package&color=phases')
+  await page.getByRole('button', {name: 'app.js', exact: true}).click()
+  await page.getByRole('button', {name: '@scope/pkg', exact: true}).click()
+  await page.getByRole('searchbox').pressSequentially('file31')
+  const link = '#zoom=app.js&zoom=folder%3A%40scope%2Fpkg&group=package&color=phases&search=file31'
+  await hashed(page, link)
+  assert.equal(await page.evaluate(() => history.length), entries + 2)
+  await page.reload()
+  assert.deepEqual(await view(page), ['@scope/pkg', 'package', 'phases', 'file31', 1])
+  // A new tab opens the view of a copied URL, and Back from a zoom there returns to it without loading the page again.
+  const linked = await browser.newPage({viewport: {width: 1440, height: 1000}, reducedMotion: 'reduce'})
+  linked.on('pageerror', (error) => errors.push(error.message))
+  await linked.goto(pathToFileURL(html).href + link)
+  assert.deepEqual(await view(linked), ['@scope/pkg', 'package', 'phases', 'file31', 1])
+  await linked.evaluate(() => document.body.setAttribute('data-opened', ''))
+  await linked.locator('#rows button').click()
+  await linked.goBack()
+  assert.equal(await linked.locator('#scope').textContent(), '@scope/pkg')
+  assert(await linked.evaluate(() => document.body.hasAttribute('data-opened')), 'Back loaded the page again')
+  // A hash pasted into the address bar opens its view as a new tab does. One that names what this report does not have,
+  // as a link made from another build does, opens the default view, and the URL loses the hash.
+  await linked.evaluate(() => (location.hash = '#zoom=app.js&zoom=folder%3Asrc'))
+  await linked.locator('#scope').filter({hasText: /^src$/}).waitFor()
+  assert.deepEqual(await view(linked), ['src', 'path', 'coverage', '', 2])
+  await linked.evaluate(() => (location.hash = '#zoom=other.js&only=file%3Aother.ts&group=modules&color=changes'))
+  await linked
+    .locator('#scope')
+    .filter({hasText: /^All bundles$/})
+    .waitFor()
+  assert.deepEqual(await view(linked), ['All bundles', 'path', 'coverage', '', 1])
+  await hashed(linked, '')
+  await linked.close()
+  // A document that may not rewrite its URL, such as a frame that another page fills from a string, still zooms.
+  const host = await browser.newPage({viewport: {width: 1440, height: 1000}, reducedMotion: 'reduce'})
+  host.on('pageerror', (error) => errors.push(error.message))
+  await host.setContent('<iframe style="width: 1400px; height: 900px"></iframe>')
+  await host.locator('iframe').evaluate((frame: HTMLIFrameElement, text) => (frame.srcdoc = text), await readFile(html, 'utf8'))
+  const framed = host.frameLocator('iframe')
+  await framed.locator('#rows button').first().click()
+  await framed.locator('#scope').filter({hasNotText: 'All bundles'}).waitFor()
+  await host.close()
 
   // Source-map names are data even when they contain a script closing tag.
   const hostile = '</script><script>globalThis.injected=true</script>'
