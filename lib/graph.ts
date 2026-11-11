@@ -398,10 +398,14 @@ interface WebpackStatsModule {
 export interface WebpackStats {
   modules?: WebpackStatsModule[]
   children?: WebpackStats[]
+  // Present in Rspack's stats with `version: true`.
+  rspackVersion?: string
 }
 
 export function webpackGraph(stats: WebpackStats, root: string): Graph {
-  const graph: Graph = {schemaVersion: 1, bundler: 'webpack', modules: [], edges: [], warnings: []}
+  // Rspack writes these stats with reason types of its own (esm import for harmony side effect evaluation) and one-based loc columns.
+  const rspack = stats.rspackVersion !== undefined
+  const graph: Graph = {schemaVersion: 1, bundler: rspack ? 'rspack' : 'webpack', modules: [], edges: [], warnings: []}
   let compilationIndex = 0
   const compilation = (stats: WebpackStats) => {
     const prefix = `${compilationIndex++}:`
@@ -438,26 +442,29 @@ export function webpackGraph(stats: WebpackStats, root: string): Graph {
       // A concatenated module holds the incoming reasons of its root module.
       const parent = parents.get(mod)
       const isRoot = parent && mod.nameForCondition && mod.nameForCondition === parent.nameForCondition
+      // A CommonJS module's reference to its own exports is not an import.
       const reasons = [...(mod.reasons || []), ...((isRoot && parent.reasons) || [])].filter(
-        (reason) => reason.active !== false && known.has(reason.moduleIdentifier),
+        (reason) => reason.active !== false && known.has(reason.moduleIdentifier) && !/self exports reference/.test(reason.type!),
       )
       for (const reason of reasons) {
         const kind = /import\(\)/.test(reason.type!)
           ? 'dynamic'
-          : /harmony/.test(reason.type!)
+          : /harmony|^esm /.test(reason.type!)
             ? 'static'
             : /cjs|require/.test(reason.type!)
               ? 'require'
               : 'unknown'
         // An import-specifier reason points to a USE, not the declaration.
         // Recover the declaration from syntax instead of presenting that use as an import.
-        const loc = /harmony import specifier/.test(reason.type!) ? null : /^(\d+):(\d+)(?:-|$)/.exec(reason.loc || '')
+        const loc = /(?:harmony|esm) import specifier/.test(reason.type!) ? null : /^(\d+):(\d+)(?:-|$)/.exec(reason.loc || '')
         graph.edges.push({
           from: prefix + reason.moduleIdentifier,
           to: prefix + mod.identifier,
           kind,
           specifier: reason.userRequest,
-          ...(loc ? {location: {line: Number(loc[1]), column: Number(loc[2]) + 1}, locationEvidence: 'webpack-stats' as const} : {}),
+          ...(loc
+            ? {location: {line: Number(loc[1]), column: Number(loc[2]) + (rspack ? 0 : 1)}, locationEvidence: 'webpack-stats' as const}
+            : {}),
         })
       }
       // Stats without orphanModules drop the reasons of concatenated inner modules. Their first issuer is then

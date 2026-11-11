@@ -3,6 +3,8 @@ import {mkdir, mkdtemp, readFile, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import webpack from 'webpack'
+import {rspack} from '@rspack/core'
+import type {Stats} from '@rspack/core'
 import {exportGraph} from '../lib/export-graph.ts'
 import {componentSites, enrichLocations, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
 import ColdpathGraphPlugin from '../lib/webpack.ts'
@@ -327,8 +329,45 @@ try {
     ['0:main', '0:other', '0:concat', '0:page', '0:inner'],
   )
   assert(edgeList(orphans('main', [])).includes('0:page unknown 0:inner'))
+
+  // Rspack names its reasons esm import and esm import specifier, counts loc columns from one, and lists a CommonJS module's
+  // reference to its own exports. Without syntax enrichment, the uses of draw must not become import locations (#99).
+  const rspackDir = join(root, 'rspack')
+  await mkdir(rspackDir)
+  await writeFile(
+    join(rspackDir, 'entry.js'),
+    "import './side.js'\nimport {draw} from './chart.js'\nconst legacy = require('./legacy.cjs')\ndraw(legacy)\n",
+  )
+  await writeFile(join(rspackDir, 'side.js'), 'globalThis.side = 1\n')
+  await writeFile(join(rspackDir, 'chart.js'), 'export function draw(value) {\n  return value\n}\n')
+  await writeFile(join(rspackDir, 'legacy.cjs'), 'module.exports = {value: 1}\n')
+  const rspackCompiler = rspack({mode: 'production', context: rspackDir, entry: './entry.js', output: {path: join(rspackDir, 'dist')}})
+  const rspackStats = await new Promise<Stats>((resolve, reject) =>
+    rspackCompiler.run((error, stats) => (error || stats!.hasErrors() ? reject(error || new Error(stats!.toString())) : resolve(stats!))),
+  )
+  await new Promise<void>((resolve, reject) => rspackCompiler.close((error) => (error ? reject(error) : resolve())))
+  const rspackGraph = webpackGraph(
+    rspackStats.toJson({all: false, version: true, modules: true, nestedModules: true, reasons: true, orphanModules: true}),
+    rspackDir,
+  )
+  const rspackFile = (id: string) =>
+    rspackGraph.modules
+      .find((m) => m.id === id)!
+      .source.split('/')
+      .at(-1)
+  assert.equal(rspackGraph.bundler, 'rspack')
+  assert.deepEqual(
+    [
+      ...new Set(
+        rspackGraph.edges.map((e) =>
+          [rspackFile(e.from), rspackFile(e.to), e.kind, e.location && `${e.location.line}:${e.location.column}`].join(' '),
+        ),
+      ),
+    ].sort(),
+    ['entry.js chart.js static ', 'entry.js legacy.cjs require 3:24', 'entry.js side.js static 1:1'],
+  )
   console.log(
-    'Verified import declaration/use distinction, type-only imports, component script blocks, source snapshot evidence, recorded graph roots, wrong export root rejection, malformed native graph rejection, Turbopack import/require separation and webpack graphs from a warm cache.',
+    'Verified import declaration/use distinction, type-only imports, component script blocks, source snapshot evidence, recorded graph roots, wrong export root rejection, malformed native graph rejection, Turbopack import/require separation, webpack graphs from a warm cache and Rspack stats.',
   )
 } finally {
   await rm(root, {recursive: true, force: true})

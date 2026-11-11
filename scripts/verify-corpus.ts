@@ -17,6 +17,7 @@ import {build as vite} from 'vite'
 import vuePlugin from '@vitejs/plugin-vue'
 import {svelte as sveltePlugin} from '@sveltejs/vite-plugin-svelte'
 import webpack from 'webpack'
+import {rspack} from '@rspack/core'
 import {AnyMap, originalPositionFor, decodedMappings, LEAST_UPPER_BOUND} from '@jridgewell/trace-mapping'
 import graphPlugin from '@yceffort/coldpath/rollup'
 import vitePlugin from '@yceffort/coldpath/vite'
@@ -154,6 +155,23 @@ await new Promise((resolve, reject) =>
 )
 await new Promise<void>((resolve, reject) => compiler.close((error) => (error ? reject(error) : resolve())))
 await finish('webpack', webpackDir, 'entry/main.js')
+
+// The same plugin in Rspack.
+const rspackDir = join(work, 'rspack')
+const rspackCompiler = rspack({
+  mode: 'production',
+  context: project,
+  entry: './src/entry.js',
+  devtool: 'source-map',
+  output: {path: rspackDir, filename: 'entry/main.js', chunkFilename: 'chunks/deep/[name].js', publicPath: '/'},
+  optimization: {concatenateModules: true},
+  plugins: [new ColdpathGraphPlugin()],
+})
+await new Promise((resolve, reject) =>
+  rspackCompiler.run((error, stats) => (error || stats!.hasErrors() ? reject(error || new Error(stats!.toString())) : resolve(stats))),
+)
+await new Promise<void>((resolve, reject) => rspackCompiler.close((error) => (error ? reject(error) : resolve())))
+await finish('rspack', rspackDir, 'entry/main.js')
 
 const nextProject = join(project, 'next')
 await mkdir(join(nextProject, 'pages'), {recursive: true})
@@ -441,6 +459,7 @@ try {
         report.recommendations.find(
           (r: {scenario: string; source: string}) => r.scenario === 'open-report' && r.source.endsWith('/' + file),
         )?.kind
+      // Rspack's minifier folds drawChart(1234) and registered(1) into openReport, so neither runs in open-report.
       if (['vite', 'vue', 'svelte', 'webpack'].includes(artifact.name)) {
         assert.equal(action('chart.js'), 'defer-review', artifact.name + ': functions-only module')
         assert.equal(action('register.js'), 'split-review', artifact.name + ': top-level registration')
@@ -457,7 +476,7 @@ try {
       assert(negative.markerErrorBytes > 0 && negative.oracleDisagreementBytes > 0)
       results.push({
         bundler: artifact.name,
-        version: require((artifact.name === 'next-turbopack' ? 'next' : artifact.name) + '/package.json').version,
+        version: require(({'next-turbopack': 'next', rspack: '@rspack/core'}[artifact.name] ?? artifact.name) + '/package.json').version,
         ...metrics,
         checkedScenarioBundles: checkedScenarios,
         graphMatchedSources: report.importPaths.length,
