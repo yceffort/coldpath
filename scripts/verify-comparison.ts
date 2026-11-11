@@ -142,6 +142,15 @@ try {
   await page.screenshot({path: join(output, 'inspector.png'), fullPage: true})
   assert(await inspector.locator('#generated-view').isVisible())
   assert.equal(await inspector.locator('#view-generated').getAttribute('aria-pressed'), 'true')
+  // The inspector's frame shares the treemap's history, so it keeps its selections out of it: selecting another source
+  // there adds no entry, and Back still zooms the treemap out (#97).
+  const entries = await page.evaluate(() => history.length)
+  await inspector.getByRole('button', {name: 'Show file list', exact: true}).click()
+  await inspector.getByRole('button', {name: 'src/initial.ts', exact: true}).click()
+  await inspector.locator('#source-title').filter({hasText: 'initial.ts'}).waitFor()
+  assert.equal(await page.evaluate(() => history.length), entries)
+  await page.goBack()
+  assert.equal(await page.locator('#scope').textContent(), 'src')
   await page.locator('#options summary').click()
   await page.getByLabel('Color tiles by').selectOption('changes')
   await page.getByRole('button', {name: 'app.js', exact: true}).click()

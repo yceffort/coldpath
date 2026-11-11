@@ -204,6 +204,8 @@ coldpath 'dist/**/*.js' --tsv -
 
 Open the HTML directly in your browser. Bundles and folders with room show their contents one level deep, and tiles too small to see are merged into one that zooms to them. Click any box to zoom into it with an animated transition, zoom back out with breadcrumbs or the browser's back button, search sources, or group by package. Tile area represents bytes; tile color is the share of each tile's bytes that never ran, with grey for unmeasured code. Every file is available in the table, including small tiles. With file/glob inputs and no output option, the CLI writes `coldpath.html` in the current directory, replacing any existing file, and prints `Wrote coldpath.html` after saving it.
 
+The URL keeps the zoom, grouping, color mode, and search, so a reload or a copied link opens the same view.
+
 Build your application with source maps and point the CLI at its JavaScript output:
 
 ```sh

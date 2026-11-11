@@ -3,6 +3,7 @@ import {useLayoutEffect, useRef, useState} from 'react'
 import {classes} from '../classes.ts'
 import {RecordingWarnings} from '../RecordingWarnings.tsx'
 import type {Report} from '../types.ts'
+import {writeHistory} from '../url.ts'
 import {Explorer} from './Explorer.tsx'
 import {number, size, sizeParts} from './format.ts'
 import {Inspector} from './Inspector.tsx'
@@ -24,6 +25,31 @@ function frameSelection(report: Report) {
     scenario: report.scenarios.includes(selection.scenario) ? (selection.scenario as string) : '',
     view: (row.hasContent ? 'original' : 'generated') as View,
   }
+}
+
+// What the explorer and the inspector show: the chunks, a chunk's sources, and in the inspector one of them or the whole chunk.
+interface Selection {
+  bundle: number | null
+  source: number | null
+  inspect: boolean
+}
+
+// The URL hash names the chunk and source by path rather than by their place in the report, so that a link made from
+// another build opens the same file when this report has it, and the chunk or the list of chunks when it does not.
+function linked(report: Report): Selection {
+  const params = new URLSearchParams(location.hash.slice(1))
+  const bundle = report.bundles.findIndex((row) => row.path === params.get('bundle'))
+  if (bundle < 0) return {bundle: null, source: null, inspect: false}
+  const source = report.bundles[bundle].sources.findIndex((row) => row.source === params.get('source'))
+  return source < 0 ? {bundle, source: null, inspect: params.get('inspect') === 'chunk'} : {bundle, source, inspect: true}
+}
+function toHash(report: Report, {bundle, source, inspect}: Selection) {
+  if (bundle === null) return ''
+  const row = report.bundles[bundle]
+  const params = new URLSearchParams({bundle: row.path})
+  if (source !== null) params.set('source', row.sources[source].source)
+  else if (inspect) params.set('inspect', 'chunk')
+  return '#' + params
 }
 
 export function Header({meta}: {meta: string}) {
@@ -94,25 +120,56 @@ export function App({report}: {report: Report}) {
     target?.current?.scrollIntoView({block: 'start'})
   })
 
-  function select(index: number) {
-    if (bundle === null) {
-      setBundle(index)
-      setSource(null)
+  // Opening or leaving a chunk clears the search, which filtered the other list: chunks match by their path and every source
+  // they hold, sources by their name and package.
+  function show(next: Selection) {
+    if (next.bundle !== bundle) {
+      setBundle(next.bundle)
       setPage(0)
-      setInspector(false)
-      setFocus(false)
       setSearch('')
-    } else {
-      const row = report.bundles[bundle].sources[index]
-      setSource(index)
-      setInspector(true)
-      setFocus(false)
+      setAppOnly(false)
+    }
+    setSource(next.source)
+    setInspector(next.inspect)
+    setFocus(false)
+    if (next.source !== null) {
+      const row = report.bundles[next.bundle!].sources[next.source]
       setView(row.hasContent ? 'original' : 'generated')
       setStatus(row.unobservedBytes ? 'unobserved' : 'all')
+    } else if (next.inspect) setView('generated')
+    runCode()
+  }
+  // Each selection is a history entry with the selection in its URL hash, so that Back returns to the one before and a
+  // copied URL or a reload opens it again. In the treemap's frame the history is the treemap's, so the page leaves it alone.
+  const framed = window.name.startsWith('coldpath:')
+  function navigate(next: Selection) {
+    show(next)
+    const hash = toHash(report, next)
+    if (!framed && location.hash !== hash) writeHistory('pushState', null, hash)
+  }
+  const restore = useRef<() => void>(null)
+  restore.current = () => {
+    const next = linked(report)
+    show(next)
+    setDisclosures(closed)
+    // A hash that names what this report does not have gives way to the hash of the view shown instead.
+    writeHistory('replaceState', null, toHash(report, next))
+  }
+  useLayoutEffect(() => {
+    if (framed) return
+    restore.current!()
+    const listener = () => restore.current!()
+    addEventListener('popstate', listener)
+    return () => removeEventListener('popstate', listener)
+  }, [])
+
+  function select(index: number) {
+    if (bundle === null) navigate({bundle: index, source: null, inspect: false})
+    else {
+      navigate({bundle, source: index, inspect: true})
       if (narrow()) scrollTo.current = 'inspector'
     }
     setDisclosures(closed)
-    runCode()
   }
 
   const totalsNote = report.compression
@@ -178,22 +235,10 @@ export function App({report}: {report: Report}) {
             setAppOnly(value)
             setPage(0)
           }}
-          onBack={() => {
-            setBundle(null)
-            setSource(null)
-            setPage(0)
-            setInspector(false)
-            setFocus(false)
-            setSearch('')
-            setAppOnly(false)
-            runCode()
-          }}
+          onBack={() => navigate({bundle: null, source: null, inspect: false})}
           onInspectBundle={() => {
-            setSource(null)
-            setInspector(true)
-            setView('generated')
+            navigate({bundle, source: null, inspect: true})
             setDisclosures((open) => ({...open, sourceInfo: false, ranges: false}))
-            runCode()
             if (narrow()) scrollTo.current = 'inspector'
           }}
         />
@@ -221,10 +266,7 @@ export function App({report}: {report: Report}) {
           }}
           onToggleFocus={() => setFocus((value) => !value)}
           onClose={() => {
-            setInspector(false)
-            setSource(null)
-            setFocus(false)
-            runCode()
+            navigate({bundle, source: null, inspect: false})
             scrollTo.current = 'explorer'
           }}
         />
