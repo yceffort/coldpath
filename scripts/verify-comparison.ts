@@ -22,6 +22,8 @@ const meta = join(output, 'graph.json')
 const indexHtml = join(output, 'index.html')
 const other = join(output, 'other.html')
 const pages = join(output, 'pages.html')
+const third = join(output, 'third.html')
+const unmatched = join(output, 'unmatched.html')
 const write = (path: string, data: unknown) => writeFile(path, JSON.stringify(data))
 const map = (sources: string[]) => ({
   version: 3,
@@ -57,6 +59,7 @@ const args = [
 
 await writeFile(indexHtml, '<script src="/app.js"></script><script src="/lazy.js"></script>')
 await writeFile(other, '<script src="/lazy.js"></script>')
+await writeFile(third, '<script src="/app.js"></script>')
 await writeFile(join(input, 'app.js'), 'abcdefghijkl')
 await write(join(input, 'app.js.map'), map(['src/initial.ts', 'src/removed.ts', 'src/later.ts']))
 await write(initial, [record('app.js', 'abcdefghijkl', [[0, 4]])])
@@ -99,6 +102,10 @@ execFileSync(
 )
 // A second document, which the baseline does not have, in the code inspector.
 execFileSync(binary, [...args, '--initial-html', other, '--baseline', baseline, '--details', '--html', pages], {stdio: 'pipe'})
+// One document that none of a baseline's several documents matches (#122).
+const several = join(output, 'several.json')
+execFileSync(binary, ['--dir', input, '--initial-html', indexHtml, '--initial-html', other, '--json', several], {stdio: 'pipe'})
+execFileSync(binary, ['--dir', input, '--initial-html', third, '--baseline', several, '--treemap', unmatched], {stdio: 'pipe'})
 const data = JSON.parse(await readFile(report, 'utf8'))
 assert.equal(data.baseline.totals.delta.bytes, 12)
 assert.equal(data.scenarioReports[1].interactionCandidates.find((s: any) => s.source === 'src/mixed.ts').interactionOnlyBytes, 1)
@@ -198,6 +205,8 @@ try {
   assert.match(documents[0], /index\.html\s+20\s+2\s+\+8 B \(12 B to 20 B\)/)
   assert.match(documents[1], /other\.html\s+4\s+1\s+Not compared$/)
   assert.equal(await inspectorPage.locator('#groups tbody tr').count(), 6)
+  await inspectorPage.goto(pathToFileURL(unmatched).href)
+  assert.match(await inspectorPage.locator('#initial-load tbody').innerText(), /third\.html\s+16\s+1\s+Not compared$/)
   await inspectorPage.close()
   await page.setViewportSize({width: 390, height: 844})
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))

@@ -837,13 +837,12 @@ fn main() -> Result<()> {
             comparison.totals.delta.bytes
         );
         if let Some(load) = &comparison.initial_load {
-            let pages = if load.pages.is_empty() {
-                vec![(String::new(), load)]
-            } else {
-                load.pages
+            let pages = match &load.pages {
+                None => vec![(String::new(), load)],
+                Some(pages) => pages
                     .iter()
                     .map(|page| (format!(" of {}", page.html), &page.change))
-                    .collect()
+                    .collect(),
             };
             for (name, load) in pages {
                 status!(
