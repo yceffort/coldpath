@@ -129,8 +129,16 @@ const pages: Record<string, [string, string]> = {
   // A script renamed by a `//# sourceURL` comment is saved under the URL it was served from (#101).
   '/renamed.html': ['text/html', '<!doctype html><script src="/r/served.js"></script>'],
   '/r/served.js': ['text/javascript', 'window.renamed=1\n//# sourceURL=renamed-bundle.js'],
+  // Code that runs by viewport and cookie, and a script that only an actions module's setup serves (#93).
+  '/environment.html': [
+    'text/html',
+    '<!doctype html><meta name="viewport" content="width=device-width"><script src="/env/environment.js"></script><script src="/env/setup.js"></script>',
+  ],
+  '/env/environment.js': ['text/javascript', await readFile(join(root, 'fixtures', 'environment.js'), 'utf8')],
 }
+let header: string | undefined
 const site = createServer((request, response) => {
+  if (request.url === '/environment.html') header = request.headers['x-coldpath'] as string | undefined
   const page = pages[request.url!]
   if (!page) return response.writeHead(404).end()
   response.setHeader('content-type', page[0] + '; charset=utf-8')
@@ -585,6 +593,66 @@ try {
   await cli('snapshot', '--url', origin + '/', '--out', channel, '--wait-ms', '0', '--browser-channel', 'chromium')
   assert(JSON.parse(await readFile(join(channel, 'coverage.json'), 'utf8')).length)
   await assert.rejects(cli('snapshot', '--url', origin + '/', '--out', channel, '--browser-channel', 'no-such-channel'), /no-such-channel/)
+  // collect's device, saved state, header and network options, and the setup export of an actions module.
+  const state = join(out, 'state.json')
+  await writeFile(
+    state,
+    JSON.stringify({
+      cookies: [
+        {name: 'session', value: 'fixture', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax'},
+      ],
+      origins: [],
+    }),
+  )
+  const setup = join(out, 'setup.mjs')
+  await writeFile(
+    setup,
+    `export async function setup({context}) {
+  await context.route('**/env/setup.js', (route) => route.fulfill({contentType: 'text/javascript', body: 'function fromSetup(){return 1}\\nfromSetup()'}))
+}\n`,
+  )
+  const calls = async (dir: string, path: string) => {
+    const entry = JSON.parse(await readFile(join(dir, 'coverage.json'), 'utf8')).find((e: {url: string}) => e.url.endsWith(path))
+    return (
+      entry && Object.fromEntries(entry.functions.filter((f: any) => f.functionName).map((f: any) => [f.functionName, f.ranges[0].count]))
+    )
+  }
+  const plain = join(out, 'plain')
+  await cli('snapshot', '--url', origin + '/environment.html', '--out', plain, '--wait-ms', '0')
+  assert.deepEqual(await calls(plain, '/env/environment.js'), {mobileLayout: 0, desktopLayout: 1, signedIn: 0, signedOut: 1})
+  assert.equal(await calls(plain, '/env/setup.js'), undefined)
+  assert.equal(header, undefined)
+  const emulated = join(out, 'emulated')
+  await cli(
+    'snapshot',
+    '--url',
+    origin + '/environment.html',
+    '--out',
+    emulated,
+    '--wait-ms',
+    '0',
+    '--actions',
+    setup,
+    '--device',
+    'Pixel 7',
+    '--storage-state',
+    state,
+    '--header',
+    'x-coldpath: fixture-header',
+    '--latency-ms',
+    '400',
+    '--download-kbps',
+    '1600',
+    '--upload-kbps',
+    '750',
+    '--cpu-slowdown',
+    '4',
+  )
+  assert.deepEqual(await calls(emulated, '/env/environment.js'), {mobileLayout: 1, desktopLayout: 0, signedIn: 1, signedOut: 0})
+  assert.deepEqual(await calls(emulated, '/env/setup.js'), {fromSetup: 1})
+  assert.equal(header, 'fixture-header')
+  // The script requests start once the throttled document response arrived.
+  assert(JSON.parse(await readFile(join(emulated, 'loading.json'), 'utf8')).bundles[`${host}/env/environment.js`].startMs >= 400)
   console.log('verified snapshot, module recovery, labeling and annotated reports')
 } finally {
   site.close()

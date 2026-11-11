@@ -73,18 +73,11 @@ export function launchOptions({browserPath, browserChannel}: {browserPath?: stri
   return {headless: true, executablePath: browserPath && resolve(browserPath), channel: browserChannel}
 }
 
-// Validates the scenario options that collect and profile share.
-export async function prepare(
+// Validates the options that snapshot shares with collect and profile: the actions module, emulation,
+// throttling, saved state, extra headers, and the browser.
+export async function prepareCapture(
   {
-    url,
-    dir,
-    prefix = '/',
-    scenario = 'initial',
     actions,
-    waitUntil = 'networkidle',
-    waitMs = 1000,
-    cdnPrefixes = [],
-    allowOrigins = [],
     device,
     viewport,
     userAgent,
@@ -95,10 +88,74 @@ export async function prepare(
     cpuSlowdown,
     storageState,
     extraHTTPHeaders,
-    expect = [],
-    allowPageErrors = false,
     browserPath,
     browserChannel,
+  }: CaptureOptions,
+  command: string,
+) {
+  let action: Action | undefined
+  let beforeNavigation: Action | undefined
+  if (actions) {
+    const module = await import(pathToFileURL(resolve(actions)).href)
+    action = module.default
+    beforeNavigation = module.setup
+    assert(
+      [action, beforeNavigation].every((f) => f === undefined || typeof f === 'function') && (action || beforeNavigation),
+      '--actions must export a default function, a setup function, or both',
+    )
+  }
+  assert(
+    extraHTTPHeaders === undefined ||
+      (typeof extraHTTPHeaders === 'object' && Object.values(extraHTTPHeaders).every((value) => typeof value === 'string')),
+    'extraHTTPHeaders must map header names to strings',
+  )
+  if (network) {
+    for (const key of ['latencyMs', 'downloadKbps', 'uploadKbps'] as const) {
+      assert(Number.isFinite(network[key]) && network[key] >= 0, `network.${key} must be a nonnegative number`)
+    }
+  }
+  assert(cpuSlowdown === undefined || (Number.isFinite(cpuSlowdown) && cpuSlowdown >= 1), '--cpu-slowdown must be a number >= 1')
+  const launch = launchOptions({browserPath, browserChannel})
+  const playwright = loadPlaywright(command)
+  let emulation: BrowserContextOptions = {viewport: {width: 1280, height: 900}}
+  if (device) {
+    assert(playwright.devices[device], `unknown Playwright device: ${device}`)
+    // Coverage needs CDP, so only the descriptor is used, not its browser type.
+    const {defaultBrowserType, ...descriptor} = playwright.devices[device]
+    emulation = descriptor
+  }
+  const overrides = {viewport, userAgent, deviceScaleFactor, isMobile, hasTouch}
+  for (const [key, value] of Object.entries(overrides)) if (value !== undefined) (emulation as Record<string, unknown>)[key] = value
+  return {
+    action,
+    beforeNavigation,
+    device,
+    network,
+    cpuSlowdown,
+    storageState,
+    extraHTTPHeaders,
+    browserPath,
+    browserChannel,
+    launch,
+    playwright,
+    emulation,
+  }
+}
+
+// Validates the scenario options that collect and profile share.
+export async function prepare(
+  {
+    url,
+    dir,
+    prefix = '/',
+    scenario = 'initial',
+    waitUntil = 'networkidle',
+    waitMs = 1000,
+    cdnPrefixes = [],
+    allowOrigins = [],
+    expect = [],
+    allowPageErrors = false,
+    ...options
   }: CaptureOptions,
   command: string,
 ) {
@@ -128,22 +185,7 @@ export async function prepare(
   })
   const allowed = new Set([target.origin, ...remotes.map((remote) => new URL(remote).origin), ...origins])
   const root = await realpath(resolve(dir))
-  let action: Action | undefined
-  let beforeNavigation: Action | undefined
-  if (actions) {
-    const module = await import(pathToFileURL(resolve(actions)).href)
-    action = module.default
-    beforeNavigation = module.setup
-    assert(
-      [action, beforeNavigation].every((f) => f === undefined || typeof f === 'function') && (action || beforeNavigation),
-      '--actions must export a default function, a setup function, or both',
-    )
-  }
-  assert(
-    extraHTTPHeaders === undefined ||
-      (typeof extraHTTPHeaders === 'object' && Object.values(extraHTTPHeaders).every((value) => typeof value === 'string')),
-    'extraHTTPHeaders must map header names to strings',
-  )
+  const capture = await prepareCapture(options, command)
   assert(
     Array.isArray(expect) && expect.every((selector) => typeof selector === 'string' && selector.trim()),
     'expect must list Playwright selectors',
@@ -154,23 +196,6 @@ export async function prepare(
   )
   const patterns = typeof allowPageErrors === 'boolean' ? (allowPageErrors ? [/(?:)/] : []) : allowPageErrors.map((p) => new RegExp(p))
   const tolerated = (message: string) => patterns.some((pattern) => pattern.test(message))
-  if (network) {
-    for (const key of ['latencyMs', 'downloadKbps', 'uploadKbps'] as const) {
-      assert(Number.isFinite(network[key]) && network[key] >= 0, `network.${key} must be a nonnegative number`)
-    }
-  }
-  assert(cpuSlowdown === undefined || (Number.isFinite(cpuSlowdown) && cpuSlowdown >= 1), '--cpu-slowdown must be a number >= 1')
-  const launch = launchOptions({browserPath, browserChannel})
-  const playwright = loadPlaywright(command)
-  let emulation: BrowserContextOptions = {viewport: {width: 1280, height: 900}}
-  if (device) {
-    assert(playwright.devices[device], `unknown Playwright device: ${device}`)
-    // Coverage needs CDP, so only the descriptor is used, not its browser type.
-    const {defaultBrowserType, ...descriptor} = playwright.devices[device]
-    emulation = descriptor
-  }
-  const overrides = {viewport, userAgent, deviceScaleFactor, isMobile, hasTouch}
-  for (const [key, value] of Object.entries(overrides)) if (value !== undefined) (emulation as Record<string, unknown>)[key] = value
 
   // Same-origin scripts under --prefix, or scripts under an explicit --cdn-prefix URL.
   const localPath = (scriptUrl: string) => {
@@ -193,23 +218,12 @@ export async function prepare(
     origins,
     allowed,
     root,
-    action,
-    beforeNavigation,
+    ...capture,
     waitUntil,
     waitMs,
     scenario,
-    device,
-    network,
-    cpuSlowdown,
-    storageState,
-    extraHTTPHeaders,
     expect,
     tolerated,
-    browserPath,
-    browserChannel,
-    launch,
-    playwright,
-    emulation,
     localPath,
   }
 }
