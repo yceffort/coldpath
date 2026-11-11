@@ -46,7 +46,7 @@ export async function setup({context}) {
 }
 ```
 
-Playwright keeps such a header on a redirect that the request follows, also one to another origin.
+Playwright keeps such a header on a redirect that the request follows, also one to another origin or to plain HTTP, and the route does not stop a redirect. Use it only for an origin whose redirects stay where the credential may go.
 
 The site chooses these URLs. A script or map URL whose decoded path is absolute or contains a backslash or a `.` or `..` segment, such as `/..%2F..%2Fx.js`, fails the snapshot with the URL in the error, so nothing is written outside `--out`.
 
