@@ -105,6 +105,7 @@ async function measure({dir}: {dir: string}) {
     const filename = join(dir, path)
     const code = await readFile(filename, 'utf8')
     const found = chunkModules(code)
+    assert(found || !/\(globalThis\.TURBOPACK=\[\]\)\)\.push\(/.test(code), `${path}: a Turbopack chunk is not recovered`)
     if (!found?.modules.length) continue
     const mapText = await readMap(filename, code, dir)
     assert(mapText, `${path}: every recovered chunk in these builds has a source map`)
