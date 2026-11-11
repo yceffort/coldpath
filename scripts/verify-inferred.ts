@@ -26,6 +26,13 @@ assert.deepEqual(
   ['34'],
   'chunks joined to a prelude by a comma',
 )
+assert.deepEqual(
+  chunkModules(
+    '!function(){try{self._sentryDebugIds={}}catch(e){}}(),(()=>{"use strict";(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push([document.currentScript,[1,(e,t,n)=>{n.a=1},2,e=>{}],3,e=>{}])})();',
+  )?.modules.map((m) => m.id),
+  ['1', '2', '3'],
+  'a wrapped Turbopack chunk with nested modules after a prelude',
+)
 // webpack emits import() with arrow functions when the target supports them; a `.then` on anything else stays a plain call,
 // including `Promise.resolve()`, which a require in user code shares with import() of a module that needs no chunk.
 const arrows = chunkModules(

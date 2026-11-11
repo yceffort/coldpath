@@ -129,15 +129,15 @@ export function chunkModules(code: string): {global: string | null; modules: Rec
     return null
   }
   // A prelude such as Sentry's debug-id snippet can join the registration with a comma: `!function(){...}(),(self.X=...).push(...)`.
-  const expressions = (statements: AstNode[]): AstNode[] =>
-    statements.flatMap(({expression: e}: AstNode) =>
+  const expressions = (nodes: AstNode[]): AstNode[] =>
+    nodes.flatMap((e) =>
       e?.type === 'CallExpression' && !e.arguments.length && e.callee.body?.body?.length === 1
-        ? expressions(e.callee.body.body)
+        ? expressions(e.callee.body.body.map((s: AstNode) => s.expression))
         : e?.type === 'SequenceExpression'
-          ? e.expressions
+          ? expressions(e.expressions)
           : [e],
     )
-  const calls = expressions(ast.program.body)
+  const calls = expressions(ast.program.body.map((s: AstNode) => s.expression))
   for (const call of calls) {
     if (call?.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' || call.callee.property.name !== 'push') continue
     let target = call.callee.object
