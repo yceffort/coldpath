@@ -228,6 +228,27 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
     if baseline.include != report.include || baseline.exclude != report.exclude {
         warnings.push("Baseline and current bundle filters differ; changes may reflect selection differences.".into());
     }
+    // Absolute roots and hashed bundle names differ between two checkouts, so the root shows
+    // only in the source identities, which are relative to it.
+    let mapped = |name: &&str| *name != crate::attribution::UNMAPPED;
+    let before_sources = baseline
+        .sources
+        .iter()
+        .filter_map(|r| r.source.as_deref())
+        .filter(mapped)
+        .collect::<std::collections::BTreeSet<_>>();
+    let after_sources = report
+        .sources
+        .iter()
+        .map(|r| r.source.as_str())
+        .filter(mapped)
+        .collect::<std::collections::BTreeSet<_>>();
+    if !before_sources.is_empty()
+        && !after_sources.is_empty()
+        && before_sources.is_disjoint(&after_sources)
+    {
+        warnings.push("No source identity in the baseline matches one in this report, so every source shows as removed and added. Source identities are relative to the analysis root: check that both reports used the same --dir and bundle selection.".into());
+    }
     if baseline
         .scenarios
         .iter()
