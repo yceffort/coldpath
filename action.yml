@@ -25,6 +25,9 @@ inputs:
   comment:
     description: Create or update one pull request comment with the Markdown summary.
     default: 'true'
+  comment-id:
+    description: Distinguishes this job's pull request comment from other coldpath comments on the same pull request. Appended to the comment marker and used as the comment heading. Letters, digits, `.`, `_` and `-`, up to 64 characters. Empty keeps the default comment.
+    default: ''
   github-token:
     description: Token used to write the comment.
     default: ${{ github.token }}
@@ -81,6 +84,7 @@ runs:
         PULL_REQUEST: ${{ github.event.pull_request.number }}
         ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         EXIT_CODE: ${{ steps.analyze.outputs.exit-code }}
+        COMMENT_ID: ${{ inputs.comment-id }}
       run: bash "$GITHUB_ACTION_PATH/action/comment.sh"
     - name: Enforce budgets
       shell: bash
