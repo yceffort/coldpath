@@ -47,6 +47,7 @@ The two report pages, the treemap (`--treemap`) and the code inspector (`--html`
 - `scripts/verify-graphs.ts`: import declaration versus usage positions, type-only syntax, source snapshot evidence, and malformed Turbopack graph rejection.
 - `scripts/verify-corpus.ts`: real esbuild, Rollup, Vite, webpack, and Next/Turbopack builds, native Chromium recordings, independent map oracle and known-origin probes, graph location assertions, plus a source-ownership negative control. Rollup, Vite, and webpack graphs come from the `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` exports. [Published results and limitations](docs/accuracy-corpus.md).
 - `scripts/verify-package.ts`: packs `@yceffort/coldpath` and a platform analyzer package, installs both into a fresh npm project, and runs the Rollup plugin, `coldpath graph`, `coldpath collect --scenarios`, `coldpath profile --scenarios`, and `coldpath analyze --scenarios --profile` there.
+- `scripts/verify-analyzer.ts`: the wrapper's message when no analyzer can start on musl Linux, with a faked platform and glibc report (not run on Alpine).
 
 Do not format or regenerate `examples/recorded/entry.js` or its map as a cosmetic edit. Their exact bytes are part of the recorded coverage's SHA-256 evidence. Source fixtures for new captures live in `fixtures/`.
 

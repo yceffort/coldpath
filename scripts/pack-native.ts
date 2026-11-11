@@ -26,6 +26,8 @@ await writeFile(
       description: `coldpath analyzer binary for ${process.platform}-${process.arch}`,
       os: [process.platform],
       cpu: [process.arch],
+      // The binary is linked against glibc; package managers that honor libc skip it on musl.
+      ...(process.platform === 'linux' && {libc: ['glibc']}),
       files: ['bin'],
     },
     null,
