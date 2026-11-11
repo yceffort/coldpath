@@ -504,6 +504,9 @@ pub struct Report {
     pub packages: Vec<PackageRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<GroupRow>,
+    /// The `--group-by` patterns, which group the baseline's sources too.
+    #[serde(skip)]
+    pub group_by: Vec<String>,
     pub warnings: Vec<String>,
     /// What the collector reported about the recorded page state: aborted origins and
     /// tolerated page errors. The numbers describe that state.
@@ -738,6 +741,7 @@ pub fn analyze_with_options(
         sources: Vec::new(),
         packages: Vec::new(),
         groups: Vec::new(),
+        group_by: Vec::new(),
         warnings,
         recording_warnings,
         excluded_bundles: Vec::new(),
@@ -1702,6 +1706,25 @@ fn initial_load(html: &Path, bundles: &[BundleRow]) -> Result<InitialLoad> {
 /// Groups sources by the shortest leading part of their path that a pattern matches, trying the
 /// patterns in order. `*` does not cross `/`; `**` does. Unmatched sources belong to no group.
 pub fn group_sources(report: &mut Report, patterns: &[String]) -> Result<()> {
+    report.groups = group_rows(
+        patterns,
+        report.sources.iter().map(|source| {
+            (
+                source.source.as_str(),
+                &source.counts,
+                source.estimated_compression.as_ref(),
+            )
+        }),
+    )?;
+    report.group_by = patterns.to_vec();
+    Ok(())
+}
+
+/// Groups of sources given as name, counts, and isolated compression estimate.
+pub(crate) fn group_rows<'a>(
+    patterns: &[String],
+    sources: impl Iterator<Item = (&'a str, &'a Counts, Option<&'a ci::CompressedSizes>)>,
+) -> Result<Vec<GroupRow>> {
     let globs = patterns
         .iter()
         .map(|pattern| {
@@ -1713,8 +1736,7 @@ pub fn group_sources(report: &mut Report, patterns: &[String]) -> Result<()> {
         })
         .collect::<Result<Vec<_>>>()?;
     let mut groups: BTreeMap<&str, GroupRow> = BTreeMap::new();
-    for source in &report.sources {
-        let name = source.source.as_str();
+    for (name, counts, estimate) in sources {
         let prefixes = || {
             name.match_indices('/')
                 .map(|(end, _)| &name[..end])
@@ -1735,8 +1757,8 @@ pub fn group_sources(report: &mut Report, patterns: &[String]) -> Result<()> {
             counts: Counts::default(),
         });
         row.sources += 1;
-        row.counts.add(&source.counts);
-        if let Some(estimate) = &source.estimated_compression {
+        row.counts.add(counts);
+        if let Some(estimate) = estimate {
             row.estimated_compression
                 .get_or_insert_with(Default::default)
                 .add(estimate);
@@ -1749,8 +1771,7 @@ pub fn group_sources(report: &mut Report, patterns: &[String]) -> Result<()> {
             .cmp(&a.counts.bytes)
             .then(a.group.cmp(&b.group))
     });
-    report.groups = groups;
-    Ok(())
+    Ok(groups)
 }
 
 fn aggregate_sources(source_counts: BTreeMap<String, Counts>) -> (Vec<SourceRow>, Vec<PackageRow>) {

@@ -1159,6 +1159,117 @@ fn group_by_sums_sources_under_the_shortest_matching_path() {
 }
 
 #[test]
+fn group_and_duplicate_budgets_compare_groups_with_the_baseline() {
+    let f = feature_fixture();
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args(["--dir", ".", "--coverage", "initial", "--json", "-"])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let report = |output: &std::process::Output| -> Value {
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    // A baseline made without --group-by: its sources are grouped with the current patterns.
+    let baseline = run(&[]);
+    assert!(baseline.status.success());
+    fs::write(f.0.join("main.json"), &baseline.stdout).unwrap();
+    let source = "abcdefghijklmnopqrstuvwx";
+    f.write("app.js", source);
+    f.map(&[
+        "src/features/auth/login.js",
+        "src/features/auth/form.js",
+        "src/features/cart/cart.js",
+        "node_modules/a/index.js",
+        "node_modules/b/index.js",
+        "src/features/auth/extra.js",
+    ]);
+    f.coverage(
+        "initial",
+        source,
+        json!([{"startOffset":0,"endOffset":6,"count":1}]),
+    );
+    let grouped = [
+        "--baseline",
+        "main.json",
+        "--group-by",
+        "src/features/*",
+        "--markdown",
+        "summary.md",
+    ];
+    let output = run(&grouped);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let groups = report(&output)["baseline"]["groups"].clone();
+    assert_eq!(groups[0]["name"], "src/features/auth");
+    assert_eq!(groups[0]["change"], "changed");
+    assert_eq!(groups[0]["before"]["bytes"], 8);
+    assert_eq!(groups[0]["delta"]["bytes"], 4);
+    assert_eq!(groups[1]["name"], "src/features/cart");
+    assert_eq!(groups[1]["change"], "unchanged");
+    let md = fs::read_to_string(f.0.join("summary.md")).unwrap();
+    assert!(
+        md.contains("Groups\n\n| Name | Change |")
+            && md.contains("| src/features/auth | changed | 8 | 12 | +4 | +4 |"),
+        "{md}"
+    );
+    // The glob selects groups by name: the --group-by pattern caps each group it forms.
+    let output = run(&[
+        &grouped[..],
+        &["--max-added-group-bytes", "src/features/*=3"],
+    ]
+    .concat());
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        report(&output)["budgetFailures"],
+        json!(["group src/features/auth: +4 exceeds budget 3"])
+    );
+    for budget in ["src/features/auth=4", "src/features/cart=0"] {
+        let output = run(&[&grouped[..], &["--max-added-group-bytes", budget]].concat());
+        assert!(output.status.success(), "{budget}");
+    }
+    let output = run(&[&grouped[..], &["--max-added-group-bytes", "src/[=1"]].concat());
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("invalid --max-added-group-bytes glob")
+    );
+
+    // cart.js is also shipped in other.js: 3 bytes besides its largest copy.
+    f.write("other.js", "xyz");
+    f.write(
+        "other.js.map",
+        &json!({"version":3,"sources":["src/features/cart/cart.js"],"names":[],"mappings":"AAAA"})
+            .to_string(),
+    );
+    let output = run(&["--max-duplicate-bytes", "2"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        report(&output)["budgetFailures"],
+        json!(["duplicate bytes: 3 exceeds budget 2"])
+    );
+    assert!(run(&["--max-duplicate-bytes", "3"]).status.success());
+    // The config keys; a group budget without --group-by cannot be checked.
+    f.write(
+        "ci.json",
+        r#"{"budgets":{"maxAddedGroupBytes":{"src/features/*":100},"maxDuplicateBytes":2}}"#,
+    );
+    let output = run(&["--config", "ci.json", "--baseline", "main.json"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        report(&output)["budgetFailures"],
+        json!([
+            "duplicate bytes: 3 exceeds budget 2",
+            "group src/features/*: cannot check budget without --group-by"
+        ])
+    );
+}
+
+#[test]
 fn a_wrong_graph_root_is_reported_instead_of_a_stale_graph() {
     let f = Fixture::new();
     f.write("app.js", "abcd");

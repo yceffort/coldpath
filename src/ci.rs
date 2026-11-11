@@ -27,6 +27,8 @@ pub struct Budgets {
     pub max_brotli_bytes: Option<usize>,
     /// Bytes of the bundles `--initial-html` names.
     pub max_initial_bytes: Option<usize>,
+    /// Sum of `sources[].duplicates.extraBytes`.
+    pub max_duplicate_bytes: Option<usize>,
     // Against `--baseline`. Without one these are reported as unchecked.
     pub max_added_bytes: Option<usize>,
     /// Unobserved-byte growth of `--initial-scenario`.
@@ -34,6 +36,8 @@ pub struct Budgets {
     pub max_added_initial_bytes: Option<usize>,
     /// Growth limits by package name, as `packages[].package` prints it.
     pub max_added_package_bytes: BTreeMap<String, usize>,
+    /// Growth limits for each `--group-by` group whose name a glob matches.
+    pub max_added_group_bytes: BTreeMap<String, usize>,
     /// Fail when a package is in this report but not in the baseline.
     pub fail_on_new_packages: bool,
     /// Packages `failOnNewPackages` tolerates.
@@ -88,6 +92,19 @@ impl Budgets {
                 report.initial_load.as_ref().map(|load| load.bytes),
                 "--initial-html",
             ),
+            (
+                "duplicate bytes",
+                self.max_duplicate_bytes,
+                Some(
+                    report
+                        .sources
+                        .iter()
+                        .filter_map(|source| source.duplicates.as_ref())
+                        .map(|duplicates| duplicates.extra_bytes)
+                        .sum(),
+                ),
+                "",
+            ),
         ] {
             if let Some(limit) = limit {
                 match value {
@@ -119,6 +136,9 @@ impl Budgets {
         if !self.max_added_package_bytes.is_empty() {
             keys.push("maxAddedPackageBytes");
         }
+        if !self.max_added_group_bytes.is_empty() {
+            keys.push("maxAddedGroupBytes");
+        }
         if self.fail_on_new_packages {
             keys.push("failOnNewPackages");
         }
@@ -129,7 +149,11 @@ impl Budgets {
     }
 
     /// Budgets on the change from a baseline.
-    pub fn check_comparison(&self, report: &Report, comparison: &Comparison) -> Vec<String> {
+    pub fn check_comparison(
+        &self,
+        report: &Report,
+        comparison: &Comparison,
+    ) -> Result<Vec<String>> {
         let mut failures = Vec::new();
         if let Some(limit) = self.max_added_bytes
             && comparison.totals.delta.bytes > limit as i128
@@ -189,6 +213,29 @@ impl Budgets {
                 ));
             }
         }
+        for (glob, limit) in &self.max_added_group_bytes {
+            if report.group_by.is_empty() {
+                failures.push(format!(
+                    "group {glob}: cannot check budget without --group-by"
+                ));
+                continue;
+            }
+            let matcher = GlobBuilder::new(glob)
+                .literal_separator(true)
+                .build()
+                .with_context(|| format!("invalid --max-added-group-bytes glob {glob:?}"))?
+                .compile_matcher();
+            for row in comparison
+                .groups
+                .iter()
+                .filter(|row| matcher.is_match(&row.name) && row.delta.bytes > *limit as i128)
+            {
+                failures.push(format!(
+                    "group {}: {:+} exceeds budget {limit}",
+                    row.name, row.delta.bytes
+                ));
+            }
+        }
         if self.fail_on_new_packages {
             for row in comparison.packages.iter().filter(|row| {
                 row.change == "added"
@@ -234,7 +281,7 @@ impl Budgets {
                 }
             }
         }
-        failures
+        Ok(failures)
     }
 }
 
@@ -550,6 +597,9 @@ pub fn markdown(report: &Report) -> String {
             ));
         }
         changes_markdown(&mut out, "Packages", &comparison.packages);
+        if !comparison.groups.is_empty() {
+            changes_markdown(&mut out, "Groups", &comparison.groups);
+        }
         changes_markdown(&mut out, "Sources", &comparison.sources);
         for scenario in &comparison.scenarios {
             out.push_str(&format!("\n### Scenario change: {}\n\nObserved: {:+} B · unobserved: {:+} B · unmeasured: {:+} B.\n",

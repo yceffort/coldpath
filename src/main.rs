@@ -50,6 +50,11 @@ struct Args {
     #[arg(long, value_name = "PACKAGE=BYTES", requires = "baseline")]
     #[serde(default)]
     max_added_package_bytes: Vec<String>,
+    /// Fail when a --group-by group whose name GLOB matches grows over --baseline by more than
+    /// BYTES. Repeatable; the --group-by pattern itself caps every group it forms.
+    #[arg(long, value_name = "GLOB=BYTES", requires_all = ["baseline", "group_by"])]
+    #[serde(default)]
+    max_added_group_bytes: Vec<String>,
     /// Fail when a package is in this report but not in --baseline.
     #[arg(long, requires = "baseline")]
     #[serde(default)]
@@ -139,6 +144,11 @@ struct Args {
     /// Fail when unmeasured bytes exceed this budget.
     #[arg(long)]
     max_unmeasured_bytes: Option<usize>,
+    /// Fail when the bytes of every copy but the largest of each source shipped in more than
+    /// one bundle (sources[].duplicates.extraBytes, summed) exceed this budget.
+    #[arg(long)]
+    #[serde(default)]
+    max_duplicate_bytes: Option<usize>,
     /// Inferred source labels (from `coldpath label`), keyed by report source name.
     #[arg(long)]
     labels: Option<PathBuf>,
@@ -190,7 +200,11 @@ impl Args {
             args.max_added_unobserved_bytes,
             args.max_added_initial_bytes,
         ) = (None, None, None, None);
-        (args.max_added_package_bytes, args.allow_new_package) = (Vec::new(), Vec::new());
+        (
+            args.max_added_package_bytes,
+            args.max_added_group_bytes,
+            args.allow_new_package,
+        ) = (Vec::new(), Vec::new(), Vec::new());
         (args.fail_on_new_package, args.max_cpu_regressions) = (false, None);
         (args.details, args.why, args.limit) = (false, None, 20);
         args.group_by = Vec::new();
@@ -262,6 +276,10 @@ fn replay_args(cli: &Args, dir: &Path) -> Result<(Args, coldpath::evidence::Mani
         (
             "--max-added-package-bytes",
             !cli.max_added_package_bytes.is_empty(),
+        ),
+        (
+            "--max-added-group-bytes",
+            !cli.max_added_group_bytes.is_empty(),
         ),
         ("--fail-on-new-package", cli.fail_on_new_package),
         ("--allow-new-package", !cli.allow_new_package.is_empty()),
@@ -576,6 +594,9 @@ fn main() -> Result<()> {
         .max_unmeasured_bytes
         .or(config.budgets.max_unmeasured_bytes);
     config.budgets.max_initial_bytes = args.max_initial_bytes.or(config.budgets.max_initial_bytes);
+    config.budgets.max_duplicate_bytes = args
+        .max_duplicate_bytes
+        .or(config.budgets.max_duplicate_bytes);
     config.budgets.max_added_bytes = args.max_added_bytes.or(config.budgets.max_added_bytes);
     config.budgets.max_added_unobserved_bytes = args
         .max_added_unobserved_bytes
@@ -598,6 +619,19 @@ fn main() -> Result<()> {
             .budgets
             .max_added_package_bytes
             .insert(package.into(), limit);
+    }
+    for binding in &args.max_added_group_bytes {
+        // A glob can contain `=`; BYTES cannot.
+        let (glob, limit) = binding
+            .rsplit_once('=')
+            .context("--max-added-group-bytes must be GLOB=BYTES")?;
+        let limit = limit
+            .parse()
+            .with_context(|| format!("--max-added-group-bytes {glob}: BYTES must be an integer"))?;
+        config
+            .budgets
+            .max_added_group_bytes
+            .insert(glob.into(), limit);
     }
     config.budgets.fail_on_new_packages |= args.fail_on_new_package;
     config.budgets.max_cpu_regressions = args
@@ -638,6 +672,8 @@ fn main() -> Result<()> {
         &args.diff
     };
     let mut report = coldpath::analyze_with_options(&dir, coverage_files, &options)?;
+    // Before the comparison, which groups the baseline's sources by the same patterns.
+    coldpath::group_sources(&mut report, &args.group_by)?;
     if let Some(path) = &args.baseline {
         let comparison = coldpath::baseline::compare(&report, &fs::read(path)?)
             .with_context(|| format!("compare baseline {}", path.display()))?;
@@ -646,7 +682,7 @@ fn main() -> Result<()> {
     }
     report.budget_failures = config.budgets.check(&report);
     let relative = match &report.baseline {
-        Some(comparison) => config.budgets.check_comparison(&report, comparison),
+        Some(comparison) => config.budgets.check_comparison(&report, comparison)?,
         None => {
             report
                 .warnings
@@ -698,7 +734,6 @@ fn main() -> Result<()> {
         coldpath::annotations::attach_loading(&mut report, &fs::read(path)?)?;
     }
     report.recommendations = coldpath::recommendations::build(&report);
-    coldpath::group_sources(&mut report, &args.group_by)?;
     if let Some(out) = &args.export {
         export(
             out,
