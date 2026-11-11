@@ -86,6 +86,7 @@ Exports a bundler's module graph for the analyzer's --graph (docs/graphs.md).
   snapshot: `Usage: coldpath snapshot --url URL --out DIRECTORY [OPTIONS...]
 
 Records the scripts a deployed site serves, their V8 coverage, and what caused each load (docs/third-party.md).
+No origin is blocked, so a --header goes with every request, also to the other origins the page loads from.
 
   --url URL                  Page to open
   --out DIRECTORY            Output directory
