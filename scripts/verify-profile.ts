@@ -188,6 +188,7 @@ try {
 }
 const flows = join(root, 'fixtures', 'flows')
 let header: string | undefined
+let polls = 0
 const pages = createServer(async (request, response) => {
   const html = (body: string) =>
     response.setHeader('content-type', 'text/html; charset=utf-8').end(`<!doctype html><meta charset="utf-8">${body}`)
@@ -198,6 +199,9 @@ const pages = createServer(async (request, response) => {
   else if (request.url === '/download')
     response.writeHead(200, {'content-type': 'text/csv', 'content-disposition': 'attachment; filename="orders.csv"'}).end('id\n1\n')
   else if (request.url === '/empty') response.writeHead(204).end()
+  // A long poll that is never answered, so the page never reaches networkidle.
+  else if (request.url === '/polling') html('<script src="/assets/first.js"></script><script>fetch("/poll")</script>')
+  else if (request.url === '/poll') polls++
   else if (request.url!.startsWith('/assets/'))
     response.setHeader('content-type', 'text/javascript; charset=utf-8').end(await readFile(join(flows, request.url!.slice(8))))
   else response.writeHead(404).end()
@@ -248,6 +252,19 @@ try {
   })
   await coldpath('profile', '--scenarios', 'stay.scenarios.json', '--runs', '2')
   assert.deepEqual(Object.keys((await read('stay-out/stay.profile.json')).windows), ['load', 'action'])
+  // The scenario file's waitUntil ends navigation at another event, and the profile says which (#90).
+  await scenarios('polling.scenarios.json', {
+    url,
+    dir: flows,
+    prefix: '/assets/',
+    waitUntil: 'load',
+    waitMs: 0,
+    out: 'polling-out',
+    scenarios: [{name: 'polling', url: '/polling'}],
+  })
+  await coldpath('profile', '--scenarios', 'polling.scenarios.json', '--runs', '2')
+  assert.equal(polls, 2)
+  assert.match((await read('polling-out/polling.profile.json')).environment.observation, /; load window: navigation load \+ 0ms;/)
   // Network, browser, and page state options from the scenario file reach profile runs and their recorded environment.
   await writeFile(
     join(work, 'tolerate.mjs'),

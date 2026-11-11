@@ -50,6 +50,7 @@ export async function loadScenarios(file: string): Promise<{dir: string; scenari
       url: config.url ? new URL(url, config.url).href : url,
       dir: resolve(base, config.dir),
       prefix: scenario.prefix ?? config.prefix,
+      waitUntil: scenario.waitUntil ?? config.waitUntil,
       waitMs: scenario.waitMs ?? config.waitMs,
       repeat: option('repeat'),
       scenario: scenario.name,

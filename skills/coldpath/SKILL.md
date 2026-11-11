@@ -205,7 +205,7 @@ When the numbers of two runs differ and the user asks why, record the scenario s
 | Symptom | Cause and fix |
 | --- | --- |
 | hash or "stale" error during collect | the served files differ from `dir`: rebuild, restart the server, and record again |
-| timeout waiting for `networkidle` | the page keeps a connection open (polling, websockets); this collector cannot record it, tell the user |
+| timeout waiting for `networkidle` | the page keeps a request open or keeps starting requests (long polling, streaming, frequent beacons): set `"waitUntil": "load"` in the scenario file, wait for the rendered UI in the actions, and check it with `expect`. Needs a version whose `npx coldpath collect --help` lists `--wait-until`; with an older one, tell the user it cannot be recorded |
 | an action times out | the awaited element never appeared; check the selector against the real UI. Popups: `page.waitForEvent('popup')` |
 | everything `[unmapped]` | source maps are disabled or not next to the bundles |
 | `requires Playwright` | install Playwright and Chromium as in Requirements |
