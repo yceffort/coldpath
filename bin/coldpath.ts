@@ -17,7 +17,7 @@ const usage = `Usage:
   coldpath collect --url URL --dir DIRECTORY --out FILE [COLLECT OPTIONS...]
   coldpath profile --scenarios coldpath.scenarios.json [--runs N]
   coldpath graph --format esbuild|webpack|turbopack --input FILE --root BUILD_ROOT --out graph.json [--environment client|server|all]
-  coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [--browser-path FILE | --browser-channel NAME]
+  coldpath snapshot --url URL --out DIRECTORY [SNAPSHOT OPTIONS...]
   coldpath modules --dir DIRECTORY --out MAP_DIRECTORY [--maps-json maps.json]... [--chunks] [--graph FILE]
   coldpath label --report report.json --out labels.json [--mode identify|describe] [--provider anthropic|openai]
                  [--model NAME] [--base-url URL] [--top N] [--lang LANGUAGE]
@@ -30,6 +30,19 @@ See docs/collecting.md, docs/cpu.md, docs/graphs.md and docs/third-party.md.`
 
 const browserOptions = `  --browser-channel NAME     Installed browser by Playwright channel, such as chrome or msedge
   --browser-path FILE        Installed Chromium-based browser executable (not with --browser-channel)`
+
+// The browser options that collect and snapshot share.
+const captureHelp = `  --header 'NAME: VALUE'     Extra HTTP request header; repeatable
+  --device NAME              Playwright device descriptor, such as 'Pixel 7'
+  --viewport WxH             Viewport (default 1280x900)
+  --user-agent UA            User agent
+  --device-scale-factor N    Pixel ratio
+  --mobile, --touch          Mobile viewport handling and touch events
+  --latency-ms N --download-kbps N --upload-kbps N
+                             Network emulation; all three are required
+  --cpu-slowdown N           CPU throttling rate (default 1, no slowdown)
+  --storage-state FILE       Playwright storage state with cookies and local storage
+${browserOptions}`
 
 const help: Record<string, string> = {
   collect: `Usage:
@@ -52,19 +65,9 @@ Records V8 coverage of one browser scenario with Playwright's Chromium (docs/col
   --repeat N                 Record N times in fresh browsers; runs 2 to N get .runN before the file extension
   --expect SELECTOR          Playwright selector that must be visible at the end; repeatable
   --allow-page-error REGEX   Record page errors whose message matches instead of failing; repeatable
-  --header 'NAME: VALUE'     Extra HTTP request header; repeatable
   --cdn-prefix URL           Also record scripts under this URL; repeatable
   --allow-origin ORIGIN      Let requests to this origin through; repeatable
-  --device NAME              Playwright device descriptor, such as 'Pixel 7'
-  --viewport WxH             Viewport (default 1280x900)
-  --user-agent UA            User agent
-  --device-scale-factor N    Pixel ratio
-  --mobile, --touch          Mobile viewport handling and touch events
-  --latency-ms N --download-kbps N --upload-kbps N
-                             Network emulation; all three are required
-  --cpu-slowdown N           CPU throttling rate (default 1, no slowdown)
-  --storage-state FILE       Playwright storage state with cookies and local storage
-${browserOptions}`,
+${captureHelp}`,
   profile: `Usage: coldpath profile --scenarios coldpath.scenarios.json [--runs N]
 
 Records repeated CPU profiles of every scenario in a scenario file (docs/cpu.md).
@@ -87,9 +90,9 @@ Records the scripts a deployed site serves, their V8 coverage, and what caused e
   --url URL                  Page to open
   --out DIRECTORY            Output directory
   --wait-ms N                Wait after load (default 5000)
-  --actions FILE             Module whose default export runs after load
+  --actions FILE             Module whose default export runs after load; its setup export runs before navigation
   --scenario NAME            Write coverage/NAME.json and accumulate visits in --out
-${browserOptions}`,
+${captureHelp}`,
   modules: `Usage: coldpath modules --dir DIRECTORY --out MAP_DIRECTORY [OPTIONS...]
 
 Recovers module boundaries from map-less webpack and Turbopack chunks as source maps (docs/third-party.md).
@@ -112,6 +115,58 @@ Asks a language model to label sources of a --details report. This sends code to
   --base-url URL             OpenAI-compatible server
   --top N                    Sources with the most unobserved bytes to label (default 50)
   --lang LANGUAGE            Language of summaries (default English)`,
+}
+
+// The options in captureHelp, which captureOptions turns into CaptureOptions.
+const captureArgs = {
+  device: {type: 'string'},
+  viewport: {type: 'string'},
+  'user-agent': {type: 'string'},
+  'device-scale-factor': {type: 'string'},
+  mobile: {type: 'boolean'},
+  touch: {type: 'boolean'},
+  'latency-ms': {type: 'string'},
+  'download-kbps': {type: 'string'},
+  'upload-kbps': {type: 'string'},
+  'cpu-slowdown': {type: 'string'},
+  'storage-state': {type: 'string'},
+  header: {type: 'string', multiple: true},
+  'browser-path': {type: 'string'},
+  'browser-channel': {type: 'string'},
+} as const
+
+function captureOptions(values: ReturnType<typeof parseArgs<{options: typeof captureArgs}>>['values']) {
+  const number = (key: 'device-scale-factor' | 'cpu-slowdown' | 'latency-ms' | 'download-kbps' | 'upload-kbps') =>
+    values[key] === undefined ? undefined : Number(values[key])
+  let viewport
+  if (values.viewport) {
+    const match = /^(\d+)x(\d+)$/.exec(values.viewport)
+    if (!match) throw new Error('--viewport must be WIDTHxHEIGHT')
+    viewport = {width: Number(match[1]), height: Number(match[2])}
+  }
+  const throttled = (['latency-ms', 'download-kbps', 'upload-kbps'] as const).some((key) => values[key] !== undefined)
+  let extraHTTPHeaders: Record<string, string> | undefined
+  for (const header of values.header ?? []) {
+    const match = /^([^:\s]+):\s*(.*)$/.exec(header)
+    if (!match) throw new Error(`--header must be 'NAME: VALUE': ${header}`)
+    extraHTTPHeaders = {...extraHTTPHeaders, [match[1]]: match[2]}
+  }
+  return {
+    device: values.device,
+    viewport,
+    userAgent: values['user-agent'],
+    deviceScaleFactor: number('device-scale-factor'),
+    isMobile: values.mobile,
+    hasTouch: values.touch,
+    cpuSlowdown: number('cpu-slowdown'),
+    network: throttled
+      ? ({latencyMs: number('latency-ms'), downloadKbps: number('download-kbps'), uploadKbps: number('upload-kbps')} as Network)
+      : undefined,
+    storageState: values['storage-state'],
+    extraHTTPHeaders,
+    browserPath: values['browser-path'],
+    browserChannel: values['browser-channel'],
+  }
 }
 
 const [command, ...rest] = process.argv.slice(2)
@@ -141,39 +196,12 @@ async function main() {
         repeat: {type: 'string'},
         'cdn-prefix': {type: 'string', multiple: true},
         'allow-origin': {type: 'string', multiple: true},
-        device: {type: 'string'},
-        viewport: {type: 'string'},
-        'user-agent': {type: 'string'},
-        'device-scale-factor': {type: 'string'},
-        mobile: {type: 'boolean'},
-        touch: {type: 'boolean'},
-        'latency-ms': {type: 'string'},
-        'download-kbps': {type: 'string'},
-        'upload-kbps': {type: 'string'},
-        'cpu-slowdown': {type: 'string'},
-        'storage-state': {type: 'string'},
         expect: {type: 'string', multiple: true},
         'allow-page-error': {type: 'string', multiple: true},
-        header: {type: 'string', multiple: true},
-        'browser-path': {type: 'string'},
-        'browser-channel': {type: 'string'},
+        ...captureArgs,
       },
     })
-    const number = (key: 'wait-ms' | 'repeat' | 'device-scale-factor' | 'cpu-slowdown' | 'latency-ms' | 'download-kbps' | 'upload-kbps') =>
-      values[key] === undefined ? undefined : Number(values[key])
-    let viewport
-    if (values.viewport) {
-      const match = /^(\d+)x(\d+)$/.exec(values.viewport)
-      if (!match) throw new Error('--viewport must be WIDTHxHEIGHT')
-      viewport = {width: Number(match[1]), height: Number(match[2])}
-    }
-    const throttled = (['latency-ms', 'download-kbps', 'upload-kbps'] as const).some((key) => values[key] !== undefined)
-    let extraHTTPHeaders: Record<string, string> | undefined
-    for (const header of values.header ?? []) {
-      const match = /^([^:\s]+):\s*(.*)$/.exec(header)
-      if (!match) throw new Error(`--header must be 'NAME: VALUE': ${header}`)
-      extraHTTPHeaders = {...extraHTTPHeaders, [match[1]]: match[2]}
-    }
+    const number = (key: 'wait-ms' | 'repeat') => (values[key] === undefined ? undefined : Number(values[key]))
     const options = {
       url: values.url,
       dir: values.dir,
@@ -186,22 +214,9 @@ async function main() {
       repeat: number('repeat'),
       cdnPrefixes: values['cdn-prefix'],
       allowOrigins: values['allow-origin'],
-      device: values.device,
-      viewport,
-      userAgent: values['user-agent'],
-      deviceScaleFactor: number('device-scale-factor'),
-      isMobile: values.mobile,
-      hasTouch: values.touch,
-      cpuSlowdown: number('cpu-slowdown'),
-      network: throttled
-        ? ({latencyMs: number('latency-ms'), downloadKbps: number('download-kbps'), uploadKbps: number('upload-kbps')} as Network)
-        : undefined,
-      storageState: values['storage-state'],
-      extraHTTPHeaders,
+      ...captureOptions(values),
       expect: values.expect,
       allowPageErrors: values['allow-page-error'],
-      browserPath: values['browser-path'],
-      browserChannel: values['browser-channel'],
     }
     if (values.scenarios) {
       if ((['url', 'dir', 'out', 'scenario', 'actions'] as const).some((key) => values[key] !== undefined))
@@ -248,15 +263,16 @@ async function main() {
         'wait-ms': {type: 'string'},
         actions: {type: 'string'},
         scenario: {type: 'string'},
-        'browser-path': {type: 'string'},
-        'browser-channel': {type: 'string'},
+        ...captureArgs,
       },
     })
     await snapshot({
-      ...values,
+      url: values.url,
+      out: values.out,
       waitMs: values['wait-ms'] === undefined ? undefined : Number(values['wait-ms']),
-      browserPath: values['browser-path'],
-      browserChannel: values['browser-channel'],
+      actions: values.actions,
+      scenario: values.scenario,
+      ...captureOptions(values),
     })
     return 0
   }

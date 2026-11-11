@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict'
 import {mkdir, readFile, writeFile} from 'node:fs/promises'
 import {dirname, isAbsolute, join, relative, resolve, sep} from 'node:path'
-import {pathToFileURL} from 'node:url'
 
-import {launchOptions, loadPlaywright} from './collect.ts'
+import {prepareCapture} from './collect.ts'
+import type {CaptureOptions} from './collect.ts'
 
 const EMPTY_MAP = JSON.stringify({version: 3, sources: [], names: [], mappings: ''})
 
@@ -39,46 +39,28 @@ const readJson = async (file: string, fallback: unknown) => {
 
 // With `scenario`, repeated visits share one directory: coverage/<scenario>.json per visit, and scripts,
 // maps and load causes accumulate. A script that differs from an earlier visit's copy is an error.
-export async function snapshot({
-  url,
-  out,
-  waitMs = 5000,
-  actions,
-  scenario,
-  browserPath,
-  browserChannel,
-}: {
-  url?: string
-  out?: string
-  waitMs?: number
-  actions?: string
-  scenario?: string
-  browserPath?: string
-  browserChannel?: string
-}) {
-  assert(
-    url && out,
-    'Usage: coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [--browser-path FILE | --browser-channel NAME]',
-  )
-  const launch = launchOptions({browserPath, browserChannel})
+export async function snapshot({url, out, waitMs = 5000, scenario, ...options}: CaptureOptions & {out?: string}) {
+  assert(url && out, 'Usage: coldpath snapshot --url URL --out DIRECTORY [OPTIONS...]')
   assert(scenario === undefined || /^[\w.-]+$/.test(scenario), '--scenario may contain letters, digits, _, . and -')
   assert(Number.isSafeInteger(waitMs) && waitMs >= 0, '--wait-ms must be a nonnegative integer')
   const target = new URL(url)
   assert(['http:', 'https:'].includes(target.protocol), '--url must use http or https')
-  let action
-  if (actions) {
-    action = (await import(pathToFileURL(resolve(actions)).href)).default
-    assert.equal(typeof action, 'function', '--actions must default-export a function')
-  }
-  const {chromium} = loadPlaywright('snapshot')
-  const browser = await chromium.launch(launch)
+  const {action, beforeNavigation, launch, playwright, emulation, network, cpuSlowdown, storageState, extraHTTPHeaders} =
+    await prepareCapture(options, 'snapshot')
+  const browser = await playwright.chromium.launch(launch)
   const entries: {url: string; source: string; functions: unknown[]}[] = [],
     documents = new Map<string | undefined, Promise<string | undefined>>(),
     requests = new Map<string, {initiator: string; startMs: number; documentURL: string}>()
   let snapshots = 0,
     initial
   try {
-    const context = await browser.newContext({viewport: {width: 1280, height: 900}})
+    // collect's emulation, saved state and headers, but neither its origin policy nor its service worker blocking:
+    // a snapshot records what the site loads.
+    const context = await browser.newContext({
+      ...emulation,
+      ...(storageState ? {storageState: resolve(storageState)} : {}),
+      ...(extraHTTPHeaders ? {extraHTTPHeaders} : {}),
+    })
     // As in collect: a beforeunload listener lets the debugger pause each document before it unloads,
     // so its coverage and script text are saved before a full-page navigation discards them.
     await context.addInitScript(() => addEventListener('beforeunload', () => {}))
@@ -100,6 +82,17 @@ export async function snapshot({
       const key = request.url.split(/[?#]/)[0]
       if (!requests.has(key)) requests.set(key, {initiator: initiator.type, startMs: Math.round((timestamp - origin) * 1000), documentURL})
     })
+    // Throttling and setup as in collect's open().
+    if (network) {
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: false,
+        latency: network.latencyMs,
+        downloadThroughput: (network.downloadKbps * 1000) / 8,
+        uploadThroughput: (network.uploadKbps * 1000) / 8,
+      })
+    }
+    if (cpuSlowdown) await cdp.send('Emulation.setCPUThrottlingRate', {rate: cpuSlowdown})
+    if (beforeNavigation) await beforeNavigation({page, context})
     const sources = new Map<string, string>(),
       embedderNames = new Map<string, string>(),
       failures: unknown[] = []

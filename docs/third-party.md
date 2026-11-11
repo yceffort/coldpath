@@ -27,12 +27,14 @@ Use `--url-prefix http://` for plain HTTP sites. Both prefixes may be passed.
 
 ## snapshot
 
-`coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [--browser-path FILE | --browser-channel NAME]` loads the page once in Chromium (or an installed browser, as in [`collect`](collecting.md#device-throttling-and-authenticated-state)) with precise V8 coverage, waits for `load` plus `--wait-ms` (default 5,000), runs an optional action module (the same `{page, context}` interface as [`collect`](collecting.md#custom-interactions)), and writes:
+`coldpath snapshot --url URL --out DIRECTORY [--wait-ms N] [--actions FILE] [--scenario NAME] [CAPTURE OPTIONS...]` loads the page once in Chromium (or an installed browser) with precise V8 coverage, waits for `load` plus `--wait-ms` (default 5,000), runs an optional action module (the same `{page, context}` interface as [`collect`](collecting.md#custom-interactions), including a `setup` export that runs before navigation), and writes:
 
 - `files/<host>/<path>`: the exact text of every external `.js`, `.mjs`, and `.cjs` script. Coverage is Playwright-format with source text, so the analyzer compares each file with what was recorded.
 - `coverage.json`: the recording. Inline scripts are left out.
 - `maps.json`: explicit map bindings for scripts that declare a `sourceMappingURL`. A map the snapshot could fetch is saved at its own URL path under `files/`, so relative source paths inside it resolve as they would on the site. A declared map that could not be fetched is bound to an empty map under `maps/`, so the analyzer treats the script as unmapped instead of failing. The analyzer itself never fetches.
 - `loading.json`: why each script loaded (see below).
+
+The capture options are those of [`collect`](collecting.md#device-throttling-and-authenticated-state): `--device`, `--viewport`, `--user-agent`, `--device-scale-factor`, `--mobile`, `--touch`, `--latency-ms` with `--download-kbps` and `--upload-kbps`, `--cpu-slowdown`, `--storage-state`, `--header`, `--browser-channel`, and `--browser-path`, so a snapshot can record a mobile or logged-in first load. The recording is Playwright-format coverage without an envelope, so unlike a `collect` recording it does not say which of them were used.
 
 The site chooses these URLs. A script or map URL whose decoded path is absolute or contains a backslash or a `.` or `..` segment, such as `/..%2F..%2Fx.js`, fails the snapshot with the URL in the error, so nothing is written outside `--out`.
 
@@ -47,7 +49,7 @@ coldpath analyze --dir artifacts/site/files --url-prefix https:// \
   --initial-scenario initial.json --scenario-order initial.json,search.json ...
 ```
 
-Unlike `collect`, `snapshot` does not block cross-origin requests and has no local build to check against: the saved text is the only evidence of what ran. Keep the snapshot directory together; a later visit may serve different files. To hand an analysis to someone else, add `--export DIRECTORY` to the analyze command (see [evidence export and replay](usage.md#evidence-export-and-replay)).
+Unlike `collect`, `snapshot` blocks neither cross-origin requests nor service workers and has no local build to check against: the saved text is the only evidence of what ran. A `setup` route has no origin policy behind it, so `route.fallback()` sends the request to the network. Keep the snapshot directory together; a later visit may serve different files. To hand an analysis to someone else, add `--export DIRECTORY` to the analyze command (see [evidence export and replay](usage.md#evidence-export-and-replay)).
 
 ### Load causes
 
