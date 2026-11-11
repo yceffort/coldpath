@@ -22,6 +22,8 @@ coldpath graph \
 
 The adapter takes edges and import kinds from the metafile and parses source syntax for locations. Roots come from emitted entry points, excluding inputs identified as dynamic imports. If an explicitly configured entry is also dynamically imported by another entry, that ambiguity cannot be resolved from these fields alone; set its exported `modules[].entry` to `true` from your build configuration. Legacy `--metafile` remains available without location parsing and cannot be combined with `--graph`.
 
+Bun writes the same format with `bun build --metafile=meta.json` or `metafile: true` in `Bun.build`, so pass it with `--format esbuild`. Its input paths are relative to the directory Bun ran in, also when `bun build` is given `--root`, so pass that directory as `--root`. With `--splitting`, Bun records a dynamic import of a bundled file as an external import of the output chunk, with the imported input in `entryPoint`; the adapter reads it as a dynamic edge to that input, which is then not a root. Bun 1.4.4 writes each source map's `sources` relative to the output directory rather than to the map, so files that `--entry-naming` or `--chunk-naming` put in a subdirectory get source paths that point outside the project; keep the default names. Checked with the CLI of Bun 1.4.4 (`bun build --splitting --minify --sourcemap=linked --metafile`).
+
 ## webpack
 
 Add the plugin to your webpack configuration. After a successful build it writes `coldpath.graph.json` to the output directory. Optional `root` defaults to webpack's `context`, and `fileName` changes the output name:
