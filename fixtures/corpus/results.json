@@ -47,6 +47,36 @@
       "negativeControlDetected": true
     },
     {
+      "bundler": "vue",
+      "version": "3.5.45",
+      "generatedBytes": 65076,
+      "oracleDisagreementBytes": 0,
+      "oracleDisagreementPercent": 0,
+      "markerBytes": 67,
+      "markerErrorBytes": 0,
+      "markerErrorPercent": 0,
+      "duplicateMappingBytes": 0,
+      "defaultOracleDisagreementBytes": 0,
+      "checkedScenarioBundles": 4,
+      "graphMatchedSources": 12,
+      "negativeControlDetected": true
+    },
+    {
+      "bundler": "svelte",
+      "version": "5.57.3",
+      "generatedBytes": 28802,
+      "oracleDisagreementBytes": 0,
+      "oracleDisagreementPercent": 0,
+      "markerBytes": 67,
+      "markerErrorBytes": 0,
+      "markerErrorPercent": 0,
+      "duplicateMappingBytes": 0,
+      "defaultOracleDisagreementBytes": 0,
+      "checkedScenarioBundles": 4,
+      "graphMatchedSources": 40,
+      "negativeControlDetected": true
+    },
+    {
       "bundler": "webpack",
       "version": "5.111.1",
       "generatedBytes": 2896,

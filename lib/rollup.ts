@@ -1,5 +1,6 @@
+import {readFile} from 'node:fs/promises'
 import {dirname, join, resolve} from 'node:path'
-import {graphRoot, importSites, sha256, sourcePath} from './graph.ts'
+import {componentSites, graphRoot, importSites, sha256, sourcePath} from './graph.ts'
 import type {GraphEdge, GraphModule, ImportKind, ImportSite} from './graph.ts'
 
 // The parts of the Rollup and Rolldown plugin APIs used here, so the types need neither package.
@@ -27,10 +28,23 @@ export default function coldpathGraph({fileName = 'coldpath.graph.json', root = 
     buildStart() {
       inputs.clear()
     },
-    transform(code: string, id: string) {
+    async transform(code: string, id: string) {
+      const [file, query] = id.split('?')
+      // Framework plugins compile a component, and its script into a virtual module such as App.vue?vue&type=script&lang.ts,
+      // so the script blocks are parsed from the file the user wrote.
+      if (/\.(?:vue|svelte)$/.test(file)) {
+        if (query === undefined || /(?:^|&)type=script(?:&|$)/.test(query)) {
+          const source = await readFile(file, 'utf8').catch(() => null)
+          if (source !== null) inputs.set(id, {sites: componentSites(source, file), sourceSha256: sha256(source)})
+        }
+        return null
+      }
       if (!/\.[cm]?[jt]sx?(?:\?|$)/.test(id)) return null
       try {
-        inputs.set(id, {sites: importSites(code, id), sourceSha256: sha256(code)})
+        inputs.set(id, {
+          sites: importSites(code, id).map((site) => ({...site, locationEvidence: 'plugin-input' as const})),
+          sourceSha256: sha256(code),
+        })
       } catch {
         inputs.set(id, {sites: [], sourceSha256: sha256(code)})
       }
@@ -70,7 +84,7 @@ export default function coldpathGraph({fileName = 'coldpath.graph.json', root = 
         for (const site of inputs.get(id)?.sites || []) {
           const target = await this.resolve(site.specifier, id)
           if (!target || target.external || !known.has(target.id)) continue
-          edges.push({from: id, to: target.id, ...site, locationEvidence: 'plugin-input', sourceSha256: inputs.get(id)!.sourceSha256})
+          edges.push({from: id, to: target.id, ...site, sourceSha256: inputs.get(id)!.sourceSha256})
           located.add(target.id)
         }
         for (const [to, kind] of known) {

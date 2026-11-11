@@ -47,6 +47,8 @@ This skill covers apps whose build you control. For a site you cannot build (no 
 
 The `--dir` of the scenario file is the build output directory, and `prefix` is the URL path it is served under (Vite default `/`; webpack uses `output.publicPath`).
 
+With the Vite plugin, imports in the `<script>` blocks of Vue and Svelte components get lines of the component file. Astro components are not parsed or checked.
+
 ### Next.js (webpack)
 
 Next.js 15 and earlier build with webpack by default; Next.js 16 needs `next build --webpack`. Add the plugin to the client compilation only:

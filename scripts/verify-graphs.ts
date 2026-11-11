@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import webpack from 'webpack'
 import {exportGraph} from '../lib/export-graph.ts'
-import {enrichLocations, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
+import {componentSites, enrichLocations, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
 import ColdpathGraphPlugin from '../lib/webpack.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'coldpath-graphs-'))
@@ -94,6 +94,56 @@ try {
       ['o', false],
     ],
   )
+  // A component's script blocks are parsed in place, so lines are those of the component file. Comments, templates, custom blocks,
+  // and scripts in markup give no location (#99).
+  const located = (sites: ReturnType<typeof importSites>) => sites.map((s) => [s.specifier, s.kind, s.location.line, s.location.column])
+  const vue = [
+    '<!-- <script setup>import "./old.js"</script> -->',
+    '<template>',
+    '  <template v-if="a"><b>{{ a }}</b></template>',
+    '  <script>import "./ignored.js"</script>',
+    '</template>',
+    '<docs><script setup>import "./sample.js"</script></docs>',
+    '<script lang="ts">',
+    "import {a} from './a'",
+    'const n = <number>a',
+    '</script>',
+    '<script setup lang="ts" generic="T extends Record<string, unknown>">',
+    "  const b = () => import('./b')",
+    '</script>',
+  ].join('\r\n')
+  assert.deepEqual(located(componentSites(vue, 'App.vue')), [
+    ['./a', 'static', 8, 1],
+    ['./b', 'dynamic', 12, 19],
+  ])
+  // A block that does not parse or is not JavaScript gives none, and past an unclosed block nothing is a root block.
+  assert.deepEqual(located(componentSites("<script>import './a'</script>\n<script setup>import './b'; const = 1</script>", 'Broken.vue')), [
+    ['./a', 'static', 1, 9],
+  ])
+  assert.deepEqual(componentSites('<script lang="coffee">import \'./a\'</script>', 'Coffee.vue'), [])
+  assert.deepEqual(componentSites("<template><p>\n<script>import './a'</script>", 'Unclosed.vue'), [])
+  const svelte = [
+    '<script module>',
+    "  import {a} from './a.js'",
+    '</script>',
+    '<style>p::before { content: "<script>" }</style>',
+    '<!-- <script>import "./old.js"</script> -->',
+    '<svelte:head><script src="https://example.com/x.js"></script></svelte:head>',
+    '<script lang="ts">',
+    "  import b from './b.js'",
+    '  let n: number = 1',
+    '</script>',
+  ].join('\n')
+  assert.deepEqual(located(componentSites(svelte, 'Card.svelte')), [
+    ['./a.js', 'static', 2, 3],
+    ['./b.js', 'static', 8, 3],
+  ])
+  // A second instance script, here in <svelte:head>, leaves the top-level one unknown.
+  assert.deepEqual(
+    componentSites("<script>import './a.js'</script>\n<svelte:head><script>import('./b.js')</script></svelte:head>", 'Head.svelte'),
+    [],
+  )
+
   assert.throws(() => turbopackGraph(Buffer.from([0, 0, 0, 99]), root), /Truncated/)
   const header = Buffer.from(
     JSON.stringify({modules: [], module_dependencies: {offset: 1, length: 100}, async_module_dependencies: {offset: 0, length: 0}}),
@@ -278,7 +328,7 @@ try {
   )
   assert(edgeList(orphans('main', [])).includes('0:page unknown 0:inner'))
   console.log(
-    'Verified import declaration/use distinction, type-only imports, source snapshot evidence, recorded graph roots, wrong export root rejection, malformed native graph rejection, Turbopack import/require separation and webpack graphs from a warm cache.',
+    'Verified import declaration/use distinction, type-only imports, component script blocks, source snapshot evidence, recorded graph roots, wrong export root rejection, malformed native graph rejection, Turbopack import/require separation and webpack graphs from a warm cache.',
   )
 } finally {
   await rm(root, {recursive: true, force: true})
