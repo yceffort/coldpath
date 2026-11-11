@@ -19,6 +19,9 @@ const baseline = join(output, 'main.json')
 const report = join(output, 'pr.json')
 const html = join(output, 'pr.html')
 const meta = join(output, 'graph.json')
+const indexHtml = join(output, 'index.html')
+const other = join(output, 'other.html')
+const pages = join(output, 'pages.html')
 const write = (path: string, data: unknown) => writeFile(path, JSON.stringify(data))
 const map = (sources: string[]) => ({
   version: 3,
@@ -46,8 +49,14 @@ const args = [
   '--scenario-order',
   'initial.json,interaction.json,search.json',
   '--source-compression',
+  '--initial-html',
+  indexHtml,
+  '--group-by',
+  'src/*',
 ]
 
+await writeFile(indexHtml, '<script src="/app.js"></script><script src="/lazy.js"></script>')
+await writeFile(other, '<script src="/lazy.js"></script>')
 await writeFile(join(input, 'app.js'), 'abcdefghijkl')
 await write(join(input, 'app.js.map'), map(['src/initial.ts', 'src/removed.ts', 'src/later.ts']))
 await write(initial, [record('app.js', 'abcdefghijkl', [[0, 4]])])
@@ -88,6 +97,8 @@ execFileSync(
   [...args, '--baseline', baseline, '--graph', meta, '--graph-root', input, '--details', '--json', report, '--treemap', html],
   {stdio: 'pipe'},
 )
+// A second document, which the baseline does not have, in the code inspector.
+execFileSync(binary, [...args, '--initial-html', other, '--baseline', baseline, '--details', '--html', pages], {stdio: 'pipe'})
 const data = JSON.parse(await readFile(report, 'utf8'))
 assert.equal(data.baseline.totals.delta.bytes, 12)
 assert.equal(data.scenarioReports[1].interactionCandidates.find((s: any) => s.source === 'src/mixed.ts').interactionOnlyBytes, 1)
@@ -109,6 +120,12 @@ try {
   assert.match((await page.locator('#headline').textContent())!, /loaded 20 B of JavaScript\. 4 B \(20%\) of it never ran/)
   assert.match(await page.locator('#later-list').innerText(), /later\.ts\s+4 B\s+4 B run only in "interaction\.json": src\/later\.ts/)
   assert.match(await page.locator('#later-list').innerText(), /mixed\.ts\s+2 B\s+2 B run only in "search\.json"/)
+  // One document on each side is compared; groups that only one side has are new or removed.
+  assert.match(await page.locator('#initial-load tbody').innerText(), /index\.html\s+20\s+2\s+\+8 B \(12 B to 20 B\)\s+Added: lazy\.js$/)
+  const group = (name: string) => page.locator('#groups tbody tr').filter({hasText: name}).innerText()
+  assert.match(await group('src/removed.ts'), /Not in this report\s+-4 \/ [-+]?\d+ \(removed\)$/)
+  assert.match(await group('src/lazy.ts'), /^src\/lazy\.ts\s+1\s+4\s+4\s+0\s+0\s+\+4 \/ 0 \(new\)$/)
+  assert.match(await group('src/initial.ts'), /^src\/initial\.ts\s+1\s+4\s/)
   await page.getByRole('button', {name: 'Show them'}).click()
   // Reports open in Coverage, even with several scenarios. First observed scenario colors each tile by its largest part.
   assert.equal(await page.getByLabel('Color tiles by').inputValue(), 'coverage')
@@ -173,6 +190,15 @@ try {
   assert.equal(await page.locator('#rows tr').count(), 1)
   assert.equal(await page.locator(top).getAttribute('data-bytes'), '4')
   await page.getByRole('searchbox').fill('')
+  // With several documents, each is compared only with the baseline's document of the same path.
+  const inspectorPage = await browser.newPage({viewport: {width: 1440, height: 1100}})
+  await inspectorPage.goto(pathToFileURL(pages).href)
+  const documents = await inspectorPage.locator('#initial-load tbody tr').allInnerTexts()
+  assert.equal(documents.length, 2)
+  assert.match(documents[0], /index\.html\s+20\s+2\s+\+8 B \(12 B to 20 B\)/)
+  assert.match(documents[1], /other\.html\s+4\s+1\s+Not compared$/)
+  assert.equal(await inspectorPage.locator('#groups tbody tr').count(), 6)
+  await inspectorPage.close()
   await page.setViewportSize({width: 390, height: 844})
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   await page.screenshot({path: join(output, 'mobile.png'), fullPage: true})
@@ -181,7 +207,7 @@ try {
   assert.deepEqual(errors, [])
   assert.deepEqual(requests, [])
   console.log(
-    'Verified three ordered phases, missing initial evidence, baseline changes, import locations, compressed estimates, review actions, per-scenario inspector, mobile layout and offline operation.',
+    'Verified three ordered phases, missing initial evidence, baseline changes, group and initial-load changes, import locations, compressed estimates, review actions, per-scenario inspector, mobile layout and offline operation.',
   )
 } finally {
   await browser.close()

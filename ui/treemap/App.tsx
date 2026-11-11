@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import {useLayoutEffect, useMemo, useRef, useState} from 'react'
+import {Groups, InitialLoads} from '../Breakdowns.tsx'
 import {RecordingWarnings} from '../RecordingWarnings.tsx'
 import type {Report} from '../types.ts'
 import {writeHistory} from '../url.ts'
@@ -259,6 +260,8 @@ export function App({report}: {report: Report}) {
     <main {...stylex.props(styles.main)}>
       <Summary report={report} onShowUnloaded={() => setUnloaded(true)} />
       <RecordingWarnings warnings={report.recordingWarnings} />
+      <InitialLoads report={report} />
+      <Groups report={report} />
       <Findings
         report={report}
         onSelect={(target) => {

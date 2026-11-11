@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import {useLayoutEffect, useRef, useState} from 'react'
+import {Groups, InitialLoads} from '../Breakdowns.tsx'
 import {classes} from '../classes.ts'
 import {RecordingWarnings} from '../RecordingWarnings.tsx'
 import type {Report} from '../types.ts'
@@ -209,6 +210,8 @@ export function App({report}: {report: Report}) {
         Sizes are uncompressed generated code. Unobserved means not executed in these recordings, not safe to delete. Unmeasured means no
         recording is available.
       </p>
+      <InitialLoads report={report} />
+      <Groups report={report} />
       <div id="workspace" {...stylex.props(styles.workspace, inspector && styles.inspecting, inspector && focus && styles.focused)}>
         <Explorer
           sectionRef={explorerRef}
