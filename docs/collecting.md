@@ -162,7 +162,7 @@ initial: left out scripts that only router prefetches for other routes loaded: c
 initial: router prefetches for other routes also loaded scripts whose modules evaluated; the analyzer leaves them out when nothing else ran: chunks/app/about/page-8840b1855a00e50a.js (/about)
 ```
 
-The analyzer's `unmeasured` breakdown and each scenario's `unmeasuredBundles` list such bundles with the reason `prefetch-only`. `scripts/verify-next-prefetch.ts` checks App Router and Pages Router builds with Turbopack and with webpack (Next.js 16.3.8): the prefetched chunks of the other routes stay out of the recorded page, and a route the scenario navigates to is recorded. `profile` does not leave prefetched chunks out.
+The analyzer's `unmeasured` breakdown and each scenario's `unmeasuredBundles` list such bundles with the reason `prefetch-only`. `scripts/verify-next-prefetch.ts` checks App Router and Pages Router builds with Turbopack and with webpack (Next.js 16.4.1): the prefetched chunks of the other routes stay out of the recorded page, and a route the scenario navigates to is recorded. `profile` does not leave prefetched chunks out.
 
 ## Checking the page state
 

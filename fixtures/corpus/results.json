@@ -48,7 +48,7 @@
     },
     {
       "bundler": "vite",
-      "version": "8.3.2",
+      "version": "8.3.3",
       "generatedBytes": 3490,
       "oracleDisagreementBytes": 0,
       "oracleDisagreementPercent": 0,
@@ -123,16 +123,16 @@
     },
     {
       "bundler": "next-turbopack",
-      "version": "16.3.8",
-      "generatedBytes": 426190,
+      "version": "16.4.1",
+      "generatedBytes": 375409,
       "oracleDisagreementBytes": 0,
       "oracleDisagreementPercent": 0,
       "markerBytes": 67,
       "markerErrorBytes": 22,
       "markerErrorPercent": 32.83582089552239,
-      "duplicateMappingBytes": 3176,
-      "defaultOracleDisagreementBytes": 27,
-      "checkedScenarioBundles": 17,
+      "duplicateMappingBytes": 2773,
+      "defaultOracleDisagreementBytes": 9,
+      "checkedScenarioBundles": 16,
       "graphMatchedSources": 21,
       "negativeControlDetected": true
     }

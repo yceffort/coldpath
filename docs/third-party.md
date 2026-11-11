@@ -83,7 +83,7 @@ Each entry also records the Chrome DevTools Protocol `initiator` type and `start
 
 ### Checked builds
 
-`scripts/verify-recovery.ts` (part of `pnpm test:corpus`) builds the corpus with source maps, recovers modules while ignoring the maps, and uses the maps as ground truth: each recovered module should contain mapping segments from exactly one original source, no source may own two recovered modules in one chunk, and no original code may sit outside the recovered modules. Measured on 2026-10-06:
+`scripts/verify-recovery.ts` (part of `pnpm test:corpus`) builds the corpus with source maps, recovers modules while ignoring the maps, and uses the maps as ground truth: each recovered module should contain mapping segments from exactly one original source, no source may own two recovered modules in one chunk, and no original code may sit outside the recovered modules. Measured on 2026-11-11:
 
 | Build | Version | Chunks | Modules | Async loaders | One source | Several sources | No mapped source | Mappings outside modules |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -92,10 +92,10 @@ Each entry also records the Chrome DevTools Protocol `initiator` type and `start
 | webpack, custom `chunkLoadingGlobal` | 5.111.1 | 3 | 16 | 0 | 16 | 0 | 0 | 0 |
 | webpack, module federation remote | 5.111.1 | 4 | 17 | 0 | 17 | 0 | 0 | 0 |
 | webpack, `concatenateModules` | 5.111.1 | 3 | 11 | 0 | 10 | 1 | 0 | 0 |
-| Next.js Turbopack | 16.3.8 | 7 | 159 | 7 | 144 | 5 | 3 | 0 |
+| Next.js Turbopack | 16.4.1 | 6 | 134 | 3 | 126 | 2 | 3 | 0 |
 | Next.js Turbopack | 15.5.25 | 7 | 157 | 7 | 142 | 5 | 3 | 0 |
 
-"Several sources" are merges made by the bundler (module concatenation, Turbopack's scope hoisting), not recovery errors. Async loaders are Turbopack's generated `e.v(...)` stubs, which have no source of their own. No stable Next.js newer than 16.3.8 existed at the time, so an older release was checked instead.
+"Several sources" are merges made by the bundler (module concatenation, Turbopack's scope hoisting), not recovery errors. Async loaders are Turbopack's generated `e.v(...)` stubs, which have no source of their own. The 15.5.25 row checks an older release, built in its own npm project.
 
 A public Vite site (`https://vite.dev/`, VitePress, snapshot on 2026-09-25) served 7 scripts (427,049 B) without source maps. `coldpath modules` recovered 0 modules there, as expected for scope-hoisted output, and `--chunks` turned each script into one whole-chunk source; the report showed 216,493 B (51%) not executed on the initial load.
 
