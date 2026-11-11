@@ -1679,6 +1679,25 @@ fn initial_html_names_the_bundles_a_document_loads() {
     );
     let replay: Value = serde_json::from_slice(&replayed.stdout).unwrap();
     assert_eq!(replay["initialLoad"]["bytes"], 4);
+    // Evidence from before --initial-html was repeatable records one path.
+    let path = f.0.join("evidence/manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let html = manifest["invocation"]["initialHtml"][0].clone();
+    assert!(html.is_string(), "{manifest}");
+    manifest["invocation"]["initialHtml"] = html;
+    fs::write(&path, manifest.to_string()).unwrap();
+    let replayed = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--replay", "evidence", "--json", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        replayed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replayed.stderr)
+    );
+    let replay: Value = serde_json::from_slice(&replayed.stdout).unwrap();
+    assert_eq!(replay["initialLoad"]["bytes"], 4);
     // Growth against the baseline, with the bundles that entered the initial load.
     f.write("app.js", "abcdef");
     f.write("index.html", "<script src=\"/assets/app.js\"></script><link rel=\"modulepreload\" href=\"/assets/lazy.js\">");
@@ -1719,6 +1738,131 @@ fn initial_html_names_the_bundles_a_document_loads() {
         report["warnings"]
             .to_string()
             .contains("names none of the analyzed bundles")
+    );
+}
+
+#[test]
+fn several_initial_html_documents_are_reported_and_budgeted_per_document() {
+    let f = Fixture::new();
+    f.write("app.js", "abcd");
+    f.write("lazy.js", "efghij");
+    f.write("index.html", "<script src=\"/assets/app.js\"></script>");
+    f.write(
+        "product.html",
+        "<script src=\"/assets/app.js\"></script><script src=\"/assets/lazy.js\"></script>",
+    );
+    f.write("other.html", "<script src=\"/assets/lazy.js\"></script>");
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args(["--dir", ".", "--json", "-"])
+            .args([
+                "--initial-html",
+                "index.html",
+                "--initial-html",
+                "product.html",
+            ])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let report = |output: &std::process::Output| -> Value {
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let output = run(&["--markdown", "summary.md", "--export", "evidence"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The top level describes the largest document, as a single document's report does.
+    assert_eq!(
+        report(&output)["initialLoad"],
+        json!({"html": "product.html", "bytes": 10, "bundles": ["app.js", "lazy.js"], "pages": [
+            {"html": "index.html", "bytes": 4, "bundles": ["app.js"]},
+            {"html": "product.html", "bytes": 10, "bundles": ["app.js", "lazy.js"]}
+        ]})
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Initial load named by index.html: 4 bytes in 1 bundles")
+            && stderr.contains("Initial load named by product.html: 10 bytes in 2 bundles"),
+        "{stderr}"
+    );
+    let md = fs::read_to_string(f.0.join("summary.md")).unwrap();
+    assert!(md.contains("Initial load named by `index.html`: **4 B** in 1 bundles"));
+    assert!(md.contains("Initial load named by `product.html`: **10 B** in 2 bundles"));
+    fs::write(f.0.join("main.json"), &output.stdout).unwrap();
+    let output = run(&["--max-initial-bytes", "5"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        report(&output)["budgetFailures"],
+        json!(["initial-load bytes of product.html: 10 exceeds budget 5"])
+    );
+    let replayed = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--replay", "evidence", "--json", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        replayed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replayed.stderr)
+    );
+    assert_eq!(
+        report(&replayed)["initialLoad"]["pages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // Each document's growth is compared with the same document in the baseline.
+    f.write("app.js", "abcdef");
+    let output = run(&["--baseline", "main.json", "--max-added-initial-bytes", "1"]);
+    assert_eq!(output.status.code(), Some(2));
+    let json = report(&output);
+    assert_eq!(
+        json["baseline"]["initialLoad"]["pages"],
+        json!([
+            {"html": "index.html", "beforeBytes": 4, "afterBytes": 6, "deltaBytes": 2, "addedBundles": [], "removedBundles": []},
+            {"html": "product.html", "beforeBytes": 10, "afterBytes": 12, "deltaBytes": 2, "addedBundles": [], "removedBundles": []}
+        ])
+    );
+    assert_eq!(
+        json["budgetFailures"],
+        json!([
+            "initial-load byte growth of index.html: +2 exceeds budget 1",
+            "initial-load byte growth of product.html: +2 exceeds budget 1"
+        ])
+    );
+    let output = run(&["--baseline", "main.json", "--max-added-initial-bytes", "2"]);
+    assert!(output.status.success());
+    // A document the baseline lacks cannot be checked.
+    let output = run(&[
+        "--initial-html",
+        "other.html",
+        "--baseline",
+        "main.json",
+        "--max-added-initial-bytes",
+        "2",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let json = report(&output);
+    assert_eq!(
+        json["budgetFailures"],
+        json!([
+            "initial-load byte growth of other.html: cannot check budget; the baseline has no initial load of that document"
+        ])
+    );
+    assert!(
+        json["baseline"]["warnings"]
+            .to_string()
+            .contains("The baseline has no initial load of other.html")
+    );
+    assert_eq!(
+        run(&["--initial-html", "index.html"]).status.code(),
+        Some(1)
     );
 }
 
