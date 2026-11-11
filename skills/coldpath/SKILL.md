@@ -45,7 +45,7 @@ This skill covers apps whose build you control. For a site you cannot build (no 
 | webpack | `import ColdpathGraphPlugin from '@yceffort/coldpath/webpack'`, `plugins: [new ColdpathGraphPlugin()]`, `devtool: 'source-map'` | `coldpath.graph.json` in `output.path` (`new ColdpathGraphPlugin({fileName})` changes it) |
 | Rspack | the webpack plugin, same config | `coldpath.graph.json` in `output.path` |
 | esbuild | `metafile: true`, write the metafile, then `npx coldpath graph --format esbuild --input meta.json --root . --out artifacts/graph.json` | `--out` path |
-| Bun | `bun build --sourcemap=linked --metafile=meta.json` with the default output names, then the esbuild command with `--root` set to the directory `bun build` ran in | `--out` path |
+| Bun | `bun build --sourcemap=linked --metafile=meta.json` with the default output names and every entry point in one directory (Bun 1.4.4 writes wrong map paths for outputs in subdirectories), then the esbuild command with `--root` set to the directory `bun build` ran in | `--out` path |
 
 The `--dir` of the scenario file is the build output directory, and `prefix` is the URL path it is served under (Vite default `/`; webpack uses `output.publicPath`).
 
