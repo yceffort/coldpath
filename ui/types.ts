@@ -102,10 +102,34 @@ export interface Change {
   delta: Counts
 }
 
+export interface InitialLoad {
+  html: string
+  bytes: number
+  bundles: string[]
+  pages?: InitialLoad[]
+}
+
+export interface InitialLoadChange {
+  beforeBytes: number
+  afterBytes: number
+  deltaBytes: number
+  addedBundles: string[]
+  removedBundles: string[]
+  pages?: (InitialLoadChange & {html: string})[]
+}
+
+export interface Group extends Counts {
+  group: string
+  pattern: string
+  sources: number
+}
+
 export interface Comparison {
   totals: Change
   sources: Change[]
   bundles: Change[]
+  groups?: Change[]
+  initialLoad?: InitialLoadChange
   scenarios: (Omit<Comparison, 'scenarios'> & {scenario: string})[]
 }
 
@@ -160,6 +184,8 @@ export interface Report {
   scenarios: string[]
   initialScenario: string | null
   scenarioReports: ScenarioReport[]
+  initialLoad?: InitialLoad | null
+  groups?: Group[]
   baseline: Comparison | null
   importPaths: ImportPath[] | null
   recommendations: Recommendation[]
