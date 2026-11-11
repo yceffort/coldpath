@@ -16,7 +16,7 @@ coldpath profile --scenarios coldpath.scenarios.json [--runs N]
 
 Each run records two windows:
 
-- `load`: navigation until `networkidle`, plus `waitMs` (1,000 ms by default).
+- `load`: navigation until `networkidle`, or the scenario's [`waitUntil`](collecting.md#what-is-recorded) event, plus `waitMs` (1,000 ms by default).
 - `action`: the scenario's custom actions. A scenario without actions has only `load`.
 
 Runs alternate between scenarios (run 1 of every scenario, then run 2), so slow drift on the machine affects every scenario alike. `--runs` defaults to 10 and must be at least 2. The sampling interval is fixed at 100 µs.

@@ -10,7 +10,7 @@ import {inferModules} from '../lib/modules.ts'
 import {DEFAULT_RUNS, profile} from '../lib/profile.ts'
 import {loadScenarios} from '../lib/scenarios.ts'
 import {snapshot} from '../lib/snapshot.ts'
-import type {Network} from '../lib/collect.ts'
+import type {CaptureOptions, Network} from '../lib/collect.ts'
 
 const usage = `Usage:
   coldpath collect --scenarios coldpath.scenarios.json [COLLECT OPTIONS...]
@@ -47,7 +47,8 @@ Records V8 coverage of one browser scenario with Playwright's Chromium (docs/col
   --prefix PATH              URL path under which --dir is served (default /)
   --scenario NAME            Scenario name (default initial)
   --actions FILE             Module whose default export runs after load; its setup export runs before navigation
-  --wait-ms N                Observation window after networkidle (default 1000)
+  --wait-until EVENT         Navigation event to wait for: load, domcontentloaded or networkidle (default networkidle)
+  --wait-ms N                Observation window after --wait-until (default 1000)
   --repeat N                 Record N times in fresh browsers; runs 2 to N get .runN before the file extension
   --expect SELECTOR          Playwright selector that must be visible at the end; repeatable
   --allow-page-error REGEX   Record page errors whose message matches instead of failing; repeatable
@@ -135,6 +136,7 @@ async function main() {
         prefix: {type: 'string'},
         scenario: {type: 'string'},
         actions: {type: 'string'},
+        'wait-until': {type: 'string'},
         'wait-ms': {type: 'string'},
         repeat: {type: 'string'},
         'cdn-prefix': {type: 'string', multiple: true},
@@ -179,6 +181,7 @@ async function main() {
       prefix: values.prefix,
       scenario: values.scenario,
       actions: values.actions,
+      waitUntil: values['wait-until'] as CaptureOptions['waitUntil'],
       waitMs: number('wait-ms'),
       repeat: number('repeat'),
       cdnPrefixes: values['cdn-prefix'],

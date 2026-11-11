@@ -22,6 +22,8 @@ export interface CaptureOptions {
   prefix?: string
   scenario?: string
   actions?: string
+  // The navigation event the observation window starts after.
+  waitUntil?: 'load' | 'domcontentloaded' | 'networkidle'
   waitMs?: number
   cdnPrefixes?: string[]
   allowOrigins?: string[]
@@ -79,6 +81,7 @@ export async function prepare(
     prefix = '/',
     scenario = 'initial',
     actions,
+    waitUntil = 'networkidle',
     waitMs = 1000,
     cdnPrefixes = [],
     allowOrigins = [],
@@ -101,6 +104,7 @@ export async function prepare(
 ) {
   assert(url && dir, 'url and dir are required')
   assert(prefix.startsWith('/') && prefix.endsWith('/') && !/[?#\\]/.test(prefix), '--prefix must be a URL path starting and ending with /')
+  assert(['load', 'domcontentloaded', 'networkidle'].includes(waitUntil), '--wait-until must be load, domcontentloaded or networkidle')
   assert(Number.isSafeInteger(waitMs) && waitMs >= 0, '--wait-ms must be a nonnegative integer')
   assert(scenario.trim(), '--scenario must not be empty')
   const target = new URL(url)
@@ -191,6 +195,7 @@ export async function prepare(
     root,
     action,
     beforeNavigation,
+    waitUntil,
     waitMs,
     scenario,
     device,
@@ -569,7 +574,7 @@ export async function collect(options: CaptureOptions & {out?: string; repeat?: 
 }
 
 async function record(setup: Setup, out: string, numbering: {run?: number; runs?: number}) {
-  const {target, root, action, beforeNavigation, waitMs, scenario, localPath} = setup
+  const {target, root, action, beforeNavigation, waitUntil, waitMs, scenario, localPath} = setup
 
   const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
@@ -663,7 +668,7 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
     await cdp.send('DOMDebugger.setEventListenerBreakpoint', {eventName: 'beforeunload'})
     await cdp.send('Profiler.enable')
     await cdp.send('Profiler.startPreciseCoverage', {callCount: true, detailed: true})
-    const response = await page.goto(target.href, {waitUntil: 'networkidle'})
+    const response = await page.goto(target.href, {waitUntil})
     assert(response?.ok(), `navigation failed: ${response?.status()}`)
     // A fixed observation window, not a performance measurement.
     await page.waitForTimeout(waitMs)
@@ -708,7 +713,7 @@ async function record(setup: Setup, out: string, numbering: {run?: number; runs?
       environment: {
         ...(await environment(browser, page, setup)),
         scope: 'page CDP target only; no worker coverage',
-        observation: `${beforeNavigation ? 'setup before navigation; ' : ''}navigation networkidle + ${waitMs}ms${action ? '; then custom actions' : ''}; ${snapshots} coverage snapshots (before each unload and at the end)`,
+        observation: `${beforeNavigation ? 'setup before navigation; ' : ''}navigation ${waitUntil} + ${waitMs}ms${action ? '; then custom actions' : ''}; ${snapshots} coverage snapshots (before each unload and at the end)`,
       },
       url: target.href,
       requests,

@@ -146,7 +146,7 @@ function reduce(profile: CpuProfile, scripts: Map<string, Script>): Window {
 
 async function measure(entry: Entry) {
   const {setup} = entry
-  const {target, root, action, waitMs, localPath} = setup
+  const {target, root, action, waitUntil, waitMs, localPath} = setup
   const browser = await setup.playwright.chromium.launch(setup.launch)
   try {
     const {context, page, cdp, errors, blocked, redirects, sockets, routesSockets} = await open(browser, setup)
@@ -167,7 +167,7 @@ async function measure(entry: Entry) {
     await cdp.send('Profiler.enable')
     await cdp.send('Profiler.setSamplingInterval', {interval: SAMPLING_INTERVAL_US})
     await cdp.send('Profiler.start')
-    const response = await page.goto(target.href, {waitUntil: 'networkidle'})
+    const response = await page.goto(target.href, {waitUntil})
     assert(response?.ok(), `navigation failed: ${response?.status()}`)
     await page.waitForTimeout(waitMs)
     const profiles: Record<string, CpuProfile> = {load: (await cdp.send('Profiler.stop')).profile}
@@ -291,7 +291,7 @@ export async function profile(scenarios: (CaptureOptions & {profileOut?: string}
         ...entry.environment,
         machine: host,
         scope: 'page main thread only; no worker CPU time',
-        observation: `a fresh browser per run; ${setup.beforeNavigation ? 'setup before navigation; ' : ''}load window: navigation networkidle + ${setup.waitMs}ms${setup.action ? '; action window: custom actions' : ''}; only the profiler runs during windows`,
+        observation: `a fresh browser per run; ${setup.beforeNavigation ? 'setup before navigation; ' : ''}load window: navigation ${setup.waitUntil} + ${setup.waitMs}ms${setup.action ? '; action window: custom actions' : ''}; only the profiler runs during windows`,
       },
       url: setup.target.href,
       blockedOrigins: [...entry.blocked].sort(),

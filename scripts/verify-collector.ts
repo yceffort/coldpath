@@ -23,7 +23,10 @@ const siteScripts: Record<string, string> = {
   'debugger.js': 'function afterDebugger(){return 1}\nsetTimeout(() => { debugger; window.done = afterDebugger() }, 200)\n',
   // V8 reports a final `//# sourceURL` comment as the script's url (#74).
   'renamed.js': 'function renamed(){return 2}\nwindow.result = renamed()\n//# sourceURL=renamed-bundle.js\n',
+  // A long poll that the server never answers, so the page never reaches networkidle (#90).
+  'polling.js': 'function poll(){return fetch("/poll")}\npoll()\n',
 }
+let polls = 0
 await mkdir(site, {recursive: true})
 for (const [name, text] of Object.entries(siteScripts)) await writeFile(join(site, name), text)
 const server = createServer((request, response) => {
@@ -33,6 +36,8 @@ const server = createServer((request, response) => {
   } else if (/^\/site\/\w+\.html$/.test(request.url!)) {
     response.setHeader('content-type', 'text/html; charset=utf-8')
     response.end(`<!doctype html><script src="${request.url!.replace(/html$/, 'js')}"></script>`)
+  } else if (request.url === '/poll') {
+    polls++
   } else if (request.url === '/assets/entry.js') {
     response.setHeader('content-type', 'text/javascript; charset=utf-8')
     response.end(servedSource)
@@ -218,13 +223,27 @@ try {
     /scenario name home\.run2 must not end in \.run<N>/,
   )
 
-  const siteCollect = async (name: string) => {
+  const siteCollect = async (name: string, ...extra: string[]) => {
     const output = join(artifacts, `${name}.coverage.json`)
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/site/${name}.html`
     // A paused page would otherwise hang the run.
     await run(
       process.execPath,
-      [join(root, 'bin', 'coldpath.ts'), 'collect', '--url', url, '--dir', site, '--prefix', '/site/', '--wait-ms', '0', '--out', output],
+      [
+        join(root, 'bin', 'coldpath.ts'),
+        'collect',
+        '--url',
+        url,
+        '--dir',
+        site,
+        '--prefix',
+        '/site/',
+        '--wait-ms',
+        '0',
+        '--out',
+        output,
+        ...extra,
+      ],
       {timeout: 60000},
     )
     return JSON.parse(await readFile(output, 'utf8'))
@@ -249,6 +268,12 @@ try {
     [['absolute.js', '/site/absolute.js']],
   )
   assert.equal(absolute.scripts[0].functions.find((f: any) => f.functionName === 'absolute').ranges[0].count, 1)
+  // With the poll still open, only a navigation event other than networkidle lets the recording start.
+  const polling = await siteCollect('polling', '--wait-until', 'load')
+  assert.equal(polls, 1)
+  assert.match(polling.environment.observation, /^navigation load \+ 0ms;/)
+  assert.equal(polling.scripts[0].functions.find((f: any) => f.functionName === 'poll').ranges[0].count, 1)
+  await assert.rejects(siteCollect('polling', '--wait-until', 'idle'), /--wait-until must be load, domcontentloaded or networkidle/)
 
   // The browser and disk must match even when the URL still looks correct.
   servedSource = source + '\n'
@@ -261,5 +286,5 @@ try {
   await new Promise((resolve) => server.close(resolve))
 }
 console.log(
-  'Verified standalone collector, custom actions, console and failed-request records, repeated runs, source/map evidence, and stale-source rejection.',
+  'Verified standalone collector, custom actions, console and failed-request records, repeated runs, a page-ready event other than networkidle, source/map evidence, and stale-source rejection.',
 )
