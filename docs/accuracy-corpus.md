@@ -20,9 +20,9 @@ All builds check static and dynamic import locations, UTF-8 ownership, per-scena
 
 ## Interpreting the Next.js result
 
-The 22/67 B probe error is **32.8358% of these specific marker bytes**, not an estimated error rate for the entire 425,932 B build. Turbopack inlines `drawChart` and `neverDrawn` into JSX event handlers; some mappings inside their literal text point to `page.jsx` instead of `chart.js`. The analyzer and reference decoder agree on those anchors, so reference-map disagreement is zero even though semantic ownership is wrong. The fixture retains this limitation and enforces a maximum of 22 probe errors in `expectations.json`.
+The 22/67 B probe error is **32.8358% of these specific marker bytes**, not an estimated error rate for the entire 375,409 B build. Turbopack inlines `drawChart` and `neverDrawn` into JSX event handlers; some mappings inside their literal text point to `page.jsx` instead of `chart.js`. The analyzer and reference decoder agree on those anchors, so reference-map disagreement is zero even though semantic ownership is wrong. The fixture retains this limitation and enforces a maximum of 22 probe errors in `expectations.json`.
 
-Next's maps also contain duplicate generated coordinates. Under coldpath's documented last-mapping-wins policy the oracle agrees. Using trace-mapping's default first-duplicate rule differs at 27 B in runtime chunks; the published snapshot records 3,175 B at duplicate coordinates. Neither convention can recover semantic truth from ambiguous maps.
+Next's maps also contain duplicate generated coordinates. Under coldpath's documented last-mapping-wins policy the oracle agrees. Using trace-mapping's default first-duplicate rule differs at 9 B, all in the Turbopack runtime chunk; the published snapshot records 2,773 B at duplicate coordinates. Neither convention can recover semantic truth from ambiguous maps.
 
 ## Interpreting the Rspack result
 
