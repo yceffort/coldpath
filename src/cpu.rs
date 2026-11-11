@@ -622,6 +622,10 @@ pub struct CpuComparison {
     /// Rows with sufficient samples in both reports, the size of the Holm family.
     pub compared: usize,
     pub sources: Vec<CpuChange>,
+    /// Scenarios whose environment or sampling interval differs from the baseline, with the
+    /// differing keys. Every row of these is inconclusive.
+    #[serde(skip)]
+    pub incomparable: Vec<(String, String)>,
 }
 
 #[derive(Debug, Serialize)]
@@ -694,6 +698,7 @@ pub fn compare(
     validate_report(before)?;
     let mut rows = Vec::new();
     let mut tested = Vec::new();
+    let mut incomparable = Vec::new();
     for scenario in &after.scenarios {
         let Some(base) = before
             .scenarios
@@ -730,6 +735,7 @@ pub fn compare(
         let comparable = differences.is_empty();
         if !comparable {
             warnings.push(format!("CPU scenario {:?}: the profile differs from the baseline in {}; its sources are inconclusive. Profile both builds on one machine in one session.", scenario.scenario, differences.join(", ")));
+            incomparable.push((scenario.scenario.clone(), differences.join(", ")));
         }
         for base_window in &base.windows {
             if !scenario
@@ -860,6 +866,7 @@ pub fn compare(
         min_effect: MIN_EFFECT,
         compared: tested.len(),
         sources: rows,
+        incomparable,
     })
 }
 

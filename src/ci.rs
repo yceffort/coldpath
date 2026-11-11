@@ -38,6 +38,8 @@ pub struct Budgets {
     pub fail_on_new_packages: bool,
     /// Packages `failOnNewPackages` tolerates.
     pub allowed_new_packages: Vec<String>,
+    /// Source and window rows of `baseline.cpu` that may be `regressed`.
+    pub max_cpu_regressions: Option<usize>,
 }
 
 impl Budgets {
@@ -120,6 +122,9 @@ impl Budgets {
         if self.fail_on_new_packages {
             keys.push("failOnNewPackages");
         }
+        if self.max_cpu_regressions.is_some() {
+            keys.push("maxCpuRegressions");
+        }
         keys
     }
 
@@ -195,6 +200,38 @@ impl Budgets {
                     "new package {}: {} bytes, not in the baseline",
                     row.name, row.after.bytes
                 ));
+            }
+        }
+        if let Some(limit) = self.max_cpu_regressions {
+            // An inconclusive row is no evidence either way: a scenario from another environment,
+            // or a comparison in which no row could be tested, fails as unchecked instead of passing.
+            match &comparison.cpu {
+                None => failures.push(
+                    "CPU regressions: cannot check budget; pass --profile for both reports".into(),
+                ),
+                Some(cpu) => {
+                    for (scenario, differences) in &cpu.incomparable {
+                        failures.push(format!(
+                            "CPU regressions: cannot check budget; scenario {scenario:?} was profiled in another environment than the baseline ({differences}), so its rows are inconclusive"
+                        ));
+                    }
+                    if cpu.incomparable.is_empty() && cpu.compared == 0 {
+                        failures.push(format!(
+                            "CPU regressions: cannot check budget; no source had {} self samples per run in both reports",
+                            crate::cpu::MIN_SAMPLES
+                        ));
+                    }
+                    let regressed = cpu
+                        .sources
+                        .iter()
+                        .filter(|row| row.change == "regressed")
+                        .count();
+                    if regressed > limit {
+                        failures.push(format!(
+                            "CPU regressions: {regressed} exceeds budget {limit}"
+                        ));
+                    }
+                }
             }
         }
         failures

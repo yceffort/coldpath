@@ -58,6 +58,11 @@ struct Args {
     #[arg(long, value_name = "PACKAGE", requires = "fail_on_new_package")]
     #[serde(default)]
     allow_new_package: Vec<String>,
+    /// Fail when more than N source/window rows of the CPU comparison with --baseline regressed,
+    /// or when the profiles cannot be compared (another environment, too few samples).
+    #[arg(long, value_name = "N", requires_all = ["baseline", "profile"])]
+    #[serde(default)]
+    max_cpu_regressions: Option<usize>,
     /// An HTML document of the build; the bundles it names form the initial load, reported
     /// as initialLoad without a browser.
     #[arg(long, value_name = "FILE")]
@@ -186,7 +191,7 @@ impl Args {
             args.max_added_initial_bytes,
         ) = (None, None, None, None);
         (args.max_added_package_bytes, args.allow_new_package) = (Vec::new(), Vec::new());
-        args.fail_on_new_package = false;
+        (args.fail_on_new_package, args.max_cpu_regressions) = (false, None);
         (args.details, args.why, args.limit) = (false, None, 20);
         args.group_by = Vec::new();
         Ok(serde_json::to_value(args)?)
@@ -260,6 +265,7 @@ fn replay_args(cli: &Args, dir: &Path) -> Result<(Args, coldpath::evidence::Mani
         ),
         ("--fail-on-new-package", cli.fail_on_new_package),
         ("--allow-new-package", !cli.allow_new_package.is_empty()),
+        ("--max-cpu-regressions", cli.max_cpu_regressions.is_some()),
         ("--why", cli.why.is_some()),
     ]
     .into_iter()
@@ -594,6 +600,9 @@ fn main() -> Result<()> {
             .insert(package.into(), limit);
     }
     config.budgets.fail_on_new_packages |= args.fail_on_new_package;
+    config.budgets.max_cpu_regressions = args
+        .max_cpu_regressions
+        .or(config.budgets.max_cpu_regressions);
     config
         .budgets
         .allowed_new_packages

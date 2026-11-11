@@ -591,6 +591,86 @@ fn baseline_reports_significant_changes_and_never_calls_missing_evidence_unchang
 }
 
 #[test]
+fn cpu_budget_counts_regressions_and_never_passes_an_inconclusive_comparison() {
+    let f = three_sources();
+    let steady = [100, 101, 99, 102, 98, 104, 103, 97, 96, 105];
+    let slower = steady.map(|value| value + 50);
+    let sparse = [1, 2, 1, 0, 3, 1, 2, 1, 0, 1];
+    let same = json!({"cpuSlowdown": 1});
+    let report = |name: &str, samples: [u64; 10], environment: &Value| {
+        f.analyze(&[f.profile(name, ten_runs(&[(1, samples)], environment.clone()))])
+            .unwrap()
+    };
+    let check = |after: &Report, before: &Report, limit| {
+        let comparison =
+            coldpath::baseline::compare(after, &serde_json::to_vec(before).unwrap()).unwrap();
+        coldpath::ci::Budgets {
+            max_cpu_regressions: Some(limit),
+            ..Default::default()
+        }
+        .check_comparison(after, &comparison)
+    };
+    let before = report("before.json", steady, &same);
+    let slow = report("slow.json", slower, &same);
+    assert_eq!(
+        check(&slow, &before, 0),
+        ["CPU regressions: 1 exceeds budget 0"]
+    );
+    assert!(check(&slow, &before, 1).is_empty());
+    // Another runner makes every row inconclusive: unchecked, neither a pass nor a regression.
+    let elsewhere = report("elsewhere.json", slower, &json!({"cpuSlowdown": 4}));
+    assert_eq!(
+        check(&elsewhere, &before, 1),
+        [
+            "CPU regressions: cannot check budget; scenario \"open\" was profiled in another environment than the baseline (cpuSlowdown), so its rows are inconclusive"
+        ]
+    );
+    let sparse_before = report("sparse-before.json", sparse, &same);
+    let sparse_after = report("sparse-after.json", sparse, &same);
+    assert_eq!(
+        check(&sparse_after, &sparse_before, 1),
+        [
+            "CPU regressions: cannot check budget; no source had 10 self samples per run in both reports"
+        ]
+    );
+    let plain = f.analyze(&[]).unwrap();
+    assert_eq!(
+        check(&slow, &plain, 1),
+        ["CPU regressions: cannot check budget; pass --profile for both reports"]
+    );
+
+    // The flag and the config key.
+    fs::write(f.0.join("main.json"), serde_json::to_vec(&before).unwrap()).unwrap();
+    f.write("ci.json", r#"{"budgets":{"maxCpuRegressions":0}}"#);
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_coldpath"))
+            .current_dir(&f.0)
+            .args(["--dir", ".", "--profile", "slow.json", "--json", "-"])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = run(&["--baseline", "main.json", "--max-cpu-regressions", "0"]);
+    assert_eq!(output.status.code(), Some(2));
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        json["budgetFailures"],
+        json!(["CPU regressions: 1 exceeds budget 0"])
+    );
+    assert!(
+        run(&["--baseline", "main.json", "--max-cpu-regressions", "1"])
+            .status
+            .success()
+    );
+    let output = run(&["--config", "ci.json"]);
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("budgets.maxCpuRegressions compares against a baseline")
+    );
+}
+
+#[test]
 fn cli_writes_cpu_reports_and_exports_profiles_as_evidence() {
     let f = three_sources();
     f.profile("open.json", two_windows());

@@ -192,7 +192,7 @@ CPU time depends on the machine: two GitHub-hosted runners measured the same bui
 
 "CPU change from baseline" (`baseline.cpu` in JSON) marks a source and window `regressed` or `improved` only when a rank test across runs stays significant after Holm correction (adjusted p below 0.05) and the shift is at least 25% of the earlier median. `unchanged` means a shift under 25%; anything else, including insufficient or missing rows, is `inconclusive`. Report `inconclusive` as "no reliable comparison" and offer the same-session rerun.
 
-In CI, build and profile both the base and the pull request in one job. The GitHub Action runs `args` in both checkouts, so each checkout needs its own profiles at the same relative paths. There is no CPU budget flag: CPU changes are reported, not enforced.
+In CI, build and profile both the base and the pull request in one job. The GitHub Action runs `args` in both checkouts, so each checkout needs its own profiles at the same relative paths. `--max-cpu-regressions N` (with `--baseline` and `--profile`) exits `2` when more than N source/window rows are `regressed`. It also exits `2` with `cannot check budget` when the profiles cannot be compared (another environment, or no row with 10 samples per run in both reports): report that as "no reliable comparison", not as a regression.
 
 ## CI budgets
 

@@ -286,7 +286,7 @@ coldpath analyze --scenarios coldpath.scenarios.json \
 
 `analyze --scenarios` also reads every scenario's coverage file; to analyze profiles alone, pass `--dir` and `--profile` to the analyzer.
 
-Each source gets its self time in each scenario's page-load and action windows: the median and quartiles over 10 runs, with its sample count. Below 10 samples per run a value is marked insufficient, never shown as cheap. With `--baseline`, a source is reported as regressed only when a rank test across runs is significant and the shift is at least 25%; profile both builds on one machine. See [CPU cost](docs/cpu.md) for attribution rules, the JSON fields, and the measurements behind these defaults.
+Each source gets its self time in each scenario's page-load and action windows: the median and quartiles over 10 runs, with its sample count. Below 10 samples per run a value is marked insufficient, never shown as cheap. With `--baseline`, a source is reported as regressed only when a rank test across runs is significant and the shift is at least 25%; profile both builds on one machine. `--max-cpu-regressions 0` then fails the run when any source regressed, and when the profiles cannot be compared. See [CPU cost](docs/cpu.md) for attribution rules, the JSON fields, and the measurements behind these defaults.
 
 ## Analyze a site you do not build
 
