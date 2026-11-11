@@ -39,7 +39,7 @@ To export from saved stats instead, include modules (with those restored from a 
 
 ```js
 stats.toJson({
-  all: false, modules: true, nestedModules: true, reasons: true, children: true,
+  all: false, version: true, modules: true, nestedModules: true, reasons: true, children: true,
   ids: true, cachedModules: true, orphanModules: true, groupModulesByType: false, groupModulesByPath: false,
   groupModulesByAttributes: false, modulesSpace: Infinity, nestedModulesSpace: Infinity,
 })
@@ -78,6 +78,10 @@ coldpath --dir .next/static --graph .next/coldpath.graph.json --treemap artifact
 ```
 
 Checked with Next.js 16.3.8 and `next build --webpack`.
+
+### Rspack
+
+The webpack plugin also runs in Rspack: add `new ColdpathGraphPlugin()` to `plugins` and set `devtool: 'source-map'` in the Rspack configuration. The graph's `bundler` is then `rspack`. Rspack writes webpack's stats format with reason types of its own, such as `esm import` for webpack's `harmony side effect evaluation` and `esm import specifier` for a use, and counts `loc` columns from one; the adapter tells Rspack's stats apart by their `rspackVersion`, so stats saved for `coldpath graph --format webpack` need `version: true` as above. A CommonJS module's reference to its own exports, which Rspack lists as a reason, is not an edge. Checked with `@rspack/core` 2.3.1, with module concatenation enabled.
 
 ## Rollup and Vite
 

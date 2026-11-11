@@ -55,6 +55,7 @@
     "@jridgewell/trace-mapping": "0.3.31",
     "@playwright/test": "1.63.0",
     "@rollup/plugin-commonjs": "29.0.3",
+    "@rspack/core": "2.3.1",
     "@stylexjs/eslint-plugin": "0.19.1",
     "@stylexjs/stylex": "0.19.1",
     "@stylexjs/unplugin": "0.19.1",

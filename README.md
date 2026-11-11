@@ -14,7 +14,7 @@ See which JavaScript runs initially, which runs only during interactions, and wh
 - Compare a baseline by source, package, and scenario; highlight growth and new modules.
 - Union recordings from the same build and reject mismatched source evidence.
 - Accept files/globs and export HTML, JSON, TSV, and Markdown; enforce byte budgets in CI.
-- Trace import chains and available locations from esbuild, webpack, Rollup/Vite (with Vite, also from the script blocks of Vue and Svelte components), and Next.js Turbopack graphs.
+- Trace import chains and available locations from esbuild, webpack, Rspack, Rollup/Vite (with Vite, also from the script blocks of Vue and Svelte components), and Next.js Turbopack graphs.
 - Review suggested loading boundaries with explicitly estimated source gzip/Brotli sizes.
 - Measure per-source CPU self time from repeated Chromium profiles, with sample counts and spread, and compare it with a baseline.
 
@@ -26,7 +26,7 @@ Early-stage software: the CLI and JSON schema may change. Unobserved bytes are c
 npm install --save-dev @yceffort/coldpath
 ```
 
-The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64; glibc 2.35 or newer) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Windows is not supported. The prebuilt analyzer needs glibc, so on musl distributions such as Alpine build the analyzer as below and set `COLDPATH_ANALYZER` to it. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` graph plugins. Collection and CPU profiling additionally need `playwright` in your project.
+The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64; glibc 2.35 or newer) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Windows is not supported. The prebuilt analyzer needs glibc, so on musl distributions such as Alpine build the analyzer as below and set `COLDPATH_ANALYZER` to it. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` (also for Rspack) graph plugins. Collection and CPU profiling additionally need `playwright` in your project.
 
 On other platforms, or to use the analyzer without Node.js, build it with Rust 1.88 or newer:
 
@@ -364,13 +364,13 @@ pnpm test:corpus
 pnpm test:package
 ```
 
-CI runs Rust tests on Linux and macOS, checks the minimum Rust version on Linux, and exercises the HTML report, input adapters, collector, CPU profiles, and real builds of five bundlers, plus Vue and Svelte components with Vite, in Chromium on both platforms, and repeats those browser checks on Linux with the minimum supported Node.js. See [CONTRIBUTING.md](CONTRIBUTING.md) for test boundaries and fixtures.
+CI runs Rust tests on Linux and macOS, checks the minimum Rust version on Linux, and exercises the HTML report, input adapters, collector, CPU profiles, and real builds of six bundlers, plus Vue and Svelte components with Vite, in Chromium on both platforms, and repeats those browser checks on Linux with the minimum supported Node.js. See [CONTRIBUTING.md](CONTRIBUTING.md) for test boundaries and fixtures.
 
 A [reproducible comparison](benchmarks/RESULTS.md) and [explorer measurements](benchmarks/MVP.md) record performance and compatibility on one saved build. These are development measurements, not a general performance ranking or proof of attribution accuracy across bundlers.
 
 ## Measured attribution accuracy
 
-The [real-build corpus](docs/accuracy-corpus.md) publishes reference-map agreement, known-origin probe errors, and per-scenario V8 range checks for esbuild, Rollup, Vite (also with Vue and Svelte components), webpack, and Next.js/Turbopack. It includes a negative control that changes source ownership while retaining every byte count.
+The [real-build corpus](docs/accuracy-corpus.md) publishes reference-map agreement, known-origin probe errors, and per-scenario V8 range checks for esbuild, Rollup, Vite (also with Vue and Svelte components), webpack, Rspack, and Next.js/Turbopack. It includes a negative control that changes source ownership while retaining every byte count.
 
 The current Next.js fixture exposes **22 incorrectly attributed probe bytes out of 67**, caused by source-map anchors inside inlined literals. Agreement with a source map does not prove semantic attribution is correct. These small fixtures do not establish an error rate for arbitrary applications.
 

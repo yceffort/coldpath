@@ -19,6 +19,8 @@ export default class ColdpathGraphPlugin {
       const root = resolve(this.root ?? compiler.context)
       const data = stats.toJson({
         all: false,
+        // Rspack's version tells its loc columns apart.
+        version: true,
         modules: true,
         nestedModules: true,
         reasons: true,
