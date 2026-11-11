@@ -36,6 +36,18 @@ Use `--url-prefix http://` for plain HTTP sites. Both prefixes may be passed.
 
 The capture options are those of [`collect`](collecting.md#device-throttling-and-authenticated-state): `--device`, `--viewport`, `--user-agent`, `--device-scale-factor`, `--mobile`, `--touch`, `--latency-ms` with `--download-kbps` and `--upload-kbps`, `--cpu-slowdown`, `--storage-state`, `--header`, `--browser-channel`, and `--browser-path`, so a snapshot can record a mobile or logged-in first load. The recording is Playwright-format coverage without an envelope, so unlike a `collect` recording it does not say which of them were used.
 
+A `--header` goes with every request the page makes, and a snapshot blocks no origin, so its value also reaches the other origins the page loads from, such as a CDN or an analytics service. Do not pass a credential this way. Load a signed-in state with `--storage-state`, whose cookies the browser sends only to the site they belong to, or add the header to the requests of one origin in the action module's `setup`:
+
+```js
+export async function setup({context}) {
+  await context.route('https://app.example.com/**', (route) =>
+    route.continue({headers: {...route.request().headers(), authorization: `Bearer ${process.env.TOKEN}`}}),
+  )
+}
+```
+
+Playwright keeps such a header on a redirect that the request follows, also one to another origin.
+
 The site chooses these URLs. A script or map URL whose decoded path is absolute or contains a backslash or a `.` or `..` segment, such as `/..%2F..%2Fx.js`, fails the snapshot with the URL in the error, so nothing is written outside `--out`.
 
 Actions may follow links or otherwise navigate the whole page. As in [`collect`](collecting.md#multi-page-flows), every document gets an empty `beforeunload` listener with a debugger breakpoint, so each document's coverage is saved just before it unloads, including code its click handlers ran on the way out. Any other debugger pause, such as a `debugger` statement in page code, is resumed at once. All documents of one visit go into one recording, where a script can appear once per document; the analyzer unions them. A script whose text changes between documents fails the snapshot. Code that runs after `beforeunload` (such as `pagehide` or `unload` handlers) is not recorded.
