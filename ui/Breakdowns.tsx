@@ -4,12 +4,10 @@ import type {Change, InitialLoad, InitialLoadChange, Report} from './types.ts'
 const number = (value: number) => value.toLocaleString('en-US')
 const signed = (value: number) => (value > 0 ? '+' : '') + number(value)
 
-// The comparison of each document, or null when it has none. As in the analyzer, one document on each side is compared
-// whatever its path; with several, only with the baseline's document of the same path.
+// The comparison of each document, or null when it has none. Without `pages` each report has one document, compared
+// whatever its path; with them, a document is compared only with the baseline's document of the same path.
 function compared(pages: InitialLoad[], change: InitialLoadChange) {
-  return pages.map((page) =>
-    change.pages?.length ? (change.pages.find((p) => p.html === page.html) ?? null) : pages.length === 1 ? change : null,
-  )
+  return pages.map((page) => (change.pages ? (change.pages.find((p) => p.html === page.html) ?? null) : change))
 }
 
 export function InitialLoads({report}: {report: Report}) {

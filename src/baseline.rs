@@ -33,10 +33,10 @@ pub struct InitialLoadChange {
     pub delta_bytes: i128,
     pub added_bundles: Vec<String>,
     pub removed_bundles: Vec<String>,
-    /// When either report has several documents: each document both have, matched by `html`.
-    /// The fields above then compare the largest document of each.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub pages: Vec<InitialPageChange>,
+    /// When either report has several documents: each document both have, matched by `html`,
+    /// empty when none matches. The fields above then compare the largest document of each.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pages: Option<Vec<InitialPageChange>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,7 +64,7 @@ impl InitialLoadChange {
                 .filter(|path| !after.bundles.contains(path))
                 .cloned()
                 .collect(),
-            pages: Vec::new(),
+            pages: None,
         }
     }
 }
@@ -405,9 +405,10 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
                 } else {
                     &before.pages
                 };
+                let mut pages = Vec::new();
                 for page in after.pages() {
                     match before_pages.iter().find(|p| p.html == page.html) {
-                        Some(base) => change.pages.push(InitialPageChange {
+                        Some(base) => pages.push(InitialPageChange {
                             html: page.html.clone(),
                             change: InitialLoadChange::new(base, page),
                         }),
@@ -425,6 +426,7 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
                         ));
                     }
                 }
+                change.pages = Some(pages);
             }
             Some(change)
         }

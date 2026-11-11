@@ -1860,6 +1860,30 @@ fn several_initial_html_documents_are_reported_and_budgeted_per_document() {
             .to_string()
             .contains("The baseline has no initial load of other.html")
     );
+    // Nor can one document that none of the baseline's documents matches, although its
+    // comparison then has no page either (#122).
+    let output = Command::new(env!("CARGO_BIN_EXE_coldpath"))
+        .current_dir(&f.0)
+        .args(["--dir", ".", "--json", "-", "--markdown", "other.md"])
+        .args(["--initial-html", "other.html", "--baseline", "main.json"])
+        .args(["--max-added-initial-bytes", "2"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let json = report(&output);
+    assert_eq!(json["baseline"]["initialLoad"]["pages"], json!([]));
+    assert_eq!(
+        json["budgetFailures"],
+        json!([
+            "initial-load byte growth of other.html: cannot check budget; the baseline has no initial load of that document"
+        ])
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("Initial load change"));
+    assert!(
+        !fs::read_to_string(f.0.join("other.md"))
+            .unwrap()
+            .contains("Initial load:")
+    );
     assert_eq!(
         run(&["--initial-html", "index.html"]).status.code(),
         Some(1)
