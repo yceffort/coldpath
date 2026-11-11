@@ -80,6 +80,16 @@ const app = await listen(async (request, response) => {
   else if (request.url === '/popup-redirect') response.writeHead(302, {location: `${apiOrigin}/via-popup`}).end()
   else if (request.url === '/popup-worker.js')
     script(response, `new WebSocket('${apiOrigin.replace('http', 'ws')}/popup').onclose = () => postMessage('closed')`)
+  // A worker and a popup's own navigation follow a redirect each. Neither is a request of a page the context has reported.
+  else if (request.url === '/targets')
+    html(
+      response,
+      `<script src="/assets/first.js"></script><script>window.viaWorker = new Promise((resolve) => { new Worker('/redirect-worker.js').onmessage = () => resolve(true) })</script>`,
+    )
+  else if (request.url === '/redirect-worker.js')
+    script(response, `fetch('/worker-redirect').then((r) => r.text(), () => 'failed').then((text) => postMessage(text))`)
+  else if (request.url === '/worker-redirect') response.writeHead(302, {location: `${apiOrigin}/via-worker`}).end()
+  else if (request.url === '/popup-navigation') response.writeHead(302, {location: `${apiOrigin}/via-popup-navigation`}).end()
   // Like a Next.js router, the page loads every script that a prefetch response names.
   else if (request.url === '/prefetch')
     html(
@@ -256,8 +266,7 @@ try {
   })
   workerSocket = false
 
-  // The redirect and WebSocket listeners cover every page of the context, so a popup cannot slip past them (#103). The
-  // popup makes its requests once it is idle, when the collector has attached to it (#110).
+  // The redirect and WebSocket listeners cover every page of the context, so a popup cannot slip past them (#103).
   const popup = join(artifacts, 'popup.mjs')
   await writeFile(
     popup,
@@ -280,6 +289,34 @@ try {
     assert(message.includes(`${apiOrigin.replace('http', 'ws')}/popup`), message)
     return true
   })
+
+  // A worker is a DevTools target of its own, and a popup follows the redirect of its own navigation before the context
+  // reports it. The collector watches both from their start beside Playwright, and a redirect that both saw counts once (#110).
+  const targets = join(artifacts, 'targets.mjs')
+  await writeFile(
+    targets,
+    `export default async function ({page}) {
+  const [opened] = await Promise.all([page.waitForEvent('popup'), page.evaluate(() => { window.open('/popup-navigation') })])
+  await opened.waitForLoadState()
+  await page.evaluate(() => viaWorker)
+}\n`,
+  )
+  await assert.rejects(record('targets', '/targets', ['--actions', targets]), ({message}: Error) => {
+    for (const redirect of [`/worker-redirect -> ${apiOrigin}/via-worker`, `/popup-navigation -> ${apiOrigin}/via-popup-navigation`])
+      assert.equal(message.split(redirect).length - 1, 1, message)
+    return true
+  })
+  await record('targets-allowed', '/targets', ['--actions', targets, '--allow-origin', apiOrigin])
+  const targetsAllowed = JSON.parse(await readFile(join(artifacts, 'targets-allowed.coverage.json'), 'utf8'))
+  for (const [path, type] of [
+    ['/via-worker', 'fetch'],
+    ['/via-popup-navigation', 'document'],
+  ])
+    assert.equal(
+      targetsAllowed.requests.filter((r: any) => r.path === apiOrigin + path && r.type === type).length,
+      1,
+      JSON.stringify(targetsAllowed.requests),
+    )
 
   // analyze puts what the collector reported above the numbers: stderr, Markdown, and both HTML pages.
   const {stderr: analyzed} = await run(binary, [
@@ -379,5 +416,5 @@ try {
   await Promise.all([app, cdn, api].map((server) => new Promise((resolve) => server.close(resolve))))
 }
 console.log(
-  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, WebSockets and redirects to unlisted origins, also from popups, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors, scripts loaded only by router prefetches and stale CDN rejection.',
+  'Verified CDN prefix mapping, pre-navigation snapshots, unmeasured worker code, blocked unlisted origins, allowed API origins, WebSockets and redirects to unlisted origins, also from popups and workers, the final state summary, expect selectors, setup routes, extra headers, tolerated page errors, scripts loaded only by router prefetches and stale CDN rejection.',
 )
