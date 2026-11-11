@@ -2,6 +2,16 @@
 # Creates or updates the single bot comment that starts with the marker.
 set -eo pipefail
 marker='<!-- coldpath-report -->'
+heading=''
+if [ -n "$COMMENT_ID" ]; then
+  # The id lands in an HTML comment and a jq filter, so only a short plain charset is accepted.
+  if ! [[ "$COMMENT_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+    echo "::error::comment-id must be 1 to 64 letters, digits, '.', '_' or '-'"
+    exit 1
+  fi
+  marker="<!-- coldpath-report:$COMMENT_ID -->"
+  heading="### $COMMENT_ID"
+fi
 body="$RUNNER_TEMP/coldpath/comment.md"
 summary="$RUNNER_TEMP/coldpath/out/summary.md"
 if [ ! -f "$summary" ]; then
@@ -10,6 +20,7 @@ if [ ! -f "$summary" ]; then
 fi
 {
   echo "$marker"
+  [ -z "$heading" ] || printf '%s\n\n' "$heading"
   [ "$EXIT_CODE" = 0 ] || printf '> [!CAUTION]\n> Budget exceeded. See the failures at the end of this summary.\n\n'
   # GitHub rejects comment bodies over 65,536 characters.
   if [ "$(wc -c < "$summary")" -gt 60000 ]; then
