@@ -1,5 +1,6 @@
 {
   "esbuild": { "maxMarkerErrorBytes": 0 },
+  "bun": { "maxMarkerErrorBytes": 0 },
   "rollup": { "maxMarkerErrorBytes": 0 },
   "vite": { "maxMarkerErrorBytes": 0 },
   "vue": { "maxMarkerErrorBytes": 0 },

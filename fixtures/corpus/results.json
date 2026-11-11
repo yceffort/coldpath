@@ -17,6 +17,21 @@
       "negativeControlDetected": true
     },
     {
+      "bundler": "bun",
+      "version": "1.4.4",
+      "generatedBytes": 2158,
+      "oracleDisagreementBytes": 0,
+      "oracleDisagreementPercent": 0,
+      "markerBytes": 67,
+      "markerErrorBytes": 0,
+      "markerErrorPercent": 0,
+      "duplicateMappingBytes": 0,
+      "defaultOracleDisagreementBytes": 0,
+      "checkedScenarioBundles": 4,
+      "graphMatchedSources": 7,
+      "negativeControlDetected": true
+    },
+    {
       "bundler": "rollup",
       "version": "4.64.0",
       "generatedBytes": 1487,

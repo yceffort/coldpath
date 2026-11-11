@@ -91,6 +91,21 @@ const es = await esbuild({
 })
 await finish('esbuild', esDir, 'entry/main.js', esbuildGraph(es.metafile, project))
 
+// Bun writes an esbuild-shaped metafile. The `bun` package's bin works only after its install script, which
+// pnpm-workspace.yaml does not allow, so this runs the binary of the platform package that it depends on. Bun writes a
+// map's sources relative to the output directory rather than to the map, so its outputs keep the default flat names.
+const bunBinary = createRequire(require.resolve('bun/package.json')).resolve(
+  `@oven/bun-${process.platform}-${process.arch === 'arm64' ? 'aarch64' : process.arch}/bin/bun`,
+)
+const bunDir = join(work, 'bun')
+const bunMeta = join(work, 'bun.meta.json')
+execFileSync(
+  bunBinary,
+  ['build', 'src/entry.js', '--outdir', bunDir, '--format=esm', '--splitting', '--minify', '--sourcemap=linked', '--metafile=' + bunMeta],
+  {cwd: project, stdio: 'inherit'},
+)
+await finish('bun', bunDir, 'entry.js', esbuildGraph(JSON.parse(await readFile(bunMeta, 'utf8')), project))
+
 const rollupDir = join(work, 'rollup')
 const built = await rollup({input: join(project, 'src/entry.js'), plugins: [graphPlugin({root: project}), commonjs()]})
 await built.write({
@@ -460,7 +475,7 @@ try {
           (r: {scenario: string; source: string}) => r.scenario === 'open-report' && r.source.endsWith('/' + file),
         )?.kind
       // Rspack's minifier folds drawChart(1234) and registered(1) into openReport, so neither runs in open-report.
-      if (['vite', 'vue', 'svelte', 'webpack'].includes(artifact.name)) {
+      if (['bun', 'vite', 'vue', 'svelte', 'webpack'].includes(artifact.name)) {
         assert.equal(action('chart.js'), 'defer-review', artifact.name + ': functions-only module')
         assert.equal(action('register.js'), 'split-review', artifact.name + ': top-level registration')
         assert.equal(action('mixed.js'), 'split-review', artifact.name + ': function called initially')

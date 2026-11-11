@@ -6,7 +6,7 @@ import webpack from 'webpack'
 import {rspack} from '@rspack/core'
 import type {Stats} from '@rspack/core'
 import {exportGraph} from '../lib/export-graph.ts'
-import {componentSites, enrichLocations, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
+import {componentSites, enrichLocations, esbuildGraph, importSites, webpackGraph, turbopackGraph} from '../lib/graph.ts'
 import ColdpathGraphPlugin from '../lib/webpack.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'coldpath-graphs-'))
@@ -45,6 +45,36 @@ try {
   await assert.rejects(
     exportGraph({format: 'esbuild', input: metafile, root: join(root, 'empty'), out: join(root, 'out/wrong.json')}),
     /none of the 1 importing modules exists under .*empty \(such as entry\.js\); pass the bundler's root/,
+  )
+  // With splitting, Bun names the chunk of a dynamically imported file as an external import, with the input in
+  // `entryPoint`: that is a dynamic edge to the input, which is not a root. Other external imports stay out (#115).
+  const bun = esbuildGraph(
+    {
+      inputs: {
+        'src/entry.js': {
+          imports: [
+            {path: './search-x.js', kind: 'dynamic-import', original: './search.js', entryPoint: 'src/search.js', external: true},
+            {path: 'https://cdn.invalid/lib.js', kind: 'dynamic-import', original: 'https://cdn.invalid/lib.js', external: true},
+            {path: './gone-x.js', kind: 'dynamic-import', original: './gone.js', entryPoint: 'src/gone.js', external: true},
+            {path: 'node:fs', kind: 'import-statement', entryPoint: 'src/search.js', external: true},
+          ],
+        },
+        'src/search.js': {imports: []},
+      },
+      outputs: {
+        './entry.js': {entryPoint: 'src/entry.js', inputs: {'src/entry.js': {bytesInOutput: 10}}},
+        './search-x.js': {entryPoint: 'src/search.js', inputs: {'src/search.js': {bytesInOutput: 5}}},
+      },
+    },
+    root,
+  )
+  assert.deepEqual(
+    bun.edges.map((e) => [e.from, e.to, e.kind, e.specifier]),
+    [['src/entry.js', 'src/search.js', 'dynamic', './search.js']],
+  )
+  assert.deepEqual(
+    bun.modules.filter((m) => m.entry).map((m) => m.id),
+    ['src/entry.js'],
   )
   const sites = importSites(
     "import type {A} from 'a'; import {type B} from 'b'; export type {C} from 'c'; import {D} from 'd'; import('e'); require('f');",
@@ -367,7 +397,7 @@ try {
     ['entry.js chart.js static ', 'entry.js legacy.cjs require 3:24', 'entry.js side.js static 1:1'],
   )
   console.log(
-    'Verified import declaration/use distinction, type-only imports, component script blocks, source snapshot evidence, recorded graph roots, wrong export root rejection, malformed native graph rejection, Turbopack import/require separation, webpack graphs from a warm cache and Rspack stats.',
+    'Verified import declaration/use distinction, type-only imports, component script blocks, source snapshot evidence, recorded graph roots, wrong export root rejection, split dynamic imports in Bun metafiles, malformed native graph rejection, Turbopack import/require separation, webpack graphs from a warm cache and Rspack stats.',
   )
 } finally {
   await rm(root, {recursive: true, force: true})

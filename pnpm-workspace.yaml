@@ -2,6 +2,7 @@ packages:
   - '.'
 
 allowBuilds:
+  bun: false
   esbuild: true
 
 minimumReleaseAgeExclude:

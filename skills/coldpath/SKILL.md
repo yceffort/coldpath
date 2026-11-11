@@ -1,6 +1,6 @@
 ---
 name: coldpath
-description: Use when someone wants to know which JavaScript in a web app they build themselves runs on initial load versus only after an interaction, why a module ends up in the initial bundle, how much shipped JavaScript never executes, what to lazy load or split, which of their source files cost main-thread CPU time during page load or an interaction, whether a change made that CPU time worse, or to enforce JavaScript byte budgets in CI. Applies to Vite, Rollup, webpack, Rspack, esbuild, and Next.js builds with the @yceffort/coldpath package.
+description: Use when someone wants to know which JavaScript in a web app they build themselves runs on initial load versus only after an interaction, why a module ends up in the initial bundle, how much shipped JavaScript never executes, what to lazy load or split, which of their source files cost main-thread CPU time during page load or an interaction, whether a change made that CPU time worse, or to enforce JavaScript byte budgets in CI. Applies to Vite, Rollup, webpack, Rspack, esbuild, Bun, and Next.js builds with the @yceffort/coldpath package.
 ---
 
 # coldpath
@@ -45,6 +45,7 @@ This skill covers apps whose build you control. For a site you cannot build (no 
 | webpack | `import ColdpathGraphPlugin from '@yceffort/coldpath/webpack'`, `plugins: [new ColdpathGraphPlugin()]`, `devtool: 'source-map'` | `coldpath.graph.json` in `output.path` (`new ColdpathGraphPlugin({fileName})` changes it) |
 | Rspack | the webpack plugin, same config | `coldpath.graph.json` in `output.path` |
 | esbuild | `metafile: true`, write the metafile, then `npx coldpath graph --format esbuild --input meta.json --root . --out artifacts/graph.json` | `--out` path |
+| Bun | `bun build --sourcemap=linked --metafile=meta.json` with the default output names, then the esbuild command with `--root` set to the directory `bun build` ran in | `--out` path |
 
 The `--dir` of the scenario file is the build output directory, and `prefix` is the URL path it is served under (Vite default `/`; webpack uses `output.publicPath`).
 

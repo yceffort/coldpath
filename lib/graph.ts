@@ -338,16 +338,33 @@ export async function enrichLocations(graph: Graph, root: string) {
 
 // The fields of an esbuild metafile that the adapter reads.
 export interface Metafile {
-  inputs: Record<string, {imports?: {path: string; kind: string; external?: boolean; original?: string}[]}>
+  inputs: Record<string, {imports?: MetafileImport[]}>
   outputs: Record<string, {entryPoint?: string; inputs?: Record<string, {bytesInOutput: number}>}>
+}
+interface MetafileImport {
+  path: string
+  kind: string
+  external?: boolean
+  original?: string
+  entryPoint?: string
 }
 
 export function esbuildGraph(meta: Metafile, root: string): Graph {
   const sizes = new Map<string, number>(),
     entries = new Set<string>()
+  // With splitting, Bun gives a dynamic import of a bundled file the output chunk as an external path and the input as
+  // its `entryPoint`.
+  const imports = (input: {imports?: MetafileImport[]}) =>
+    (input.imports || []).map((i) =>
+      i.external && i.kind === 'dynamic-import' && i.entryPoint && Object.hasOwn(meta.inputs, i.entryPoint)
+        ? {...i, path: i.entryPoint, external: false}
+        : i,
+    )
   const dynamicallyImported = new Set(
     Object.values(meta.inputs).flatMap((input) =>
-      (input.imports || []).filter((i) => !i.external && i.kind === 'dynamic-import').map((i) => i.path),
+      imports(input)
+        .filter((i) => !i.external && i.kind === 'dynamic-import')
+        .map((i) => i.path),
     ),
   )
   for (const [filename, output] of Object.entries(meta.outputs)) {
@@ -366,7 +383,7 @@ export function esbuildGraph(meta: Metafile, root: string): Graph {
       emittedBytes: sizes.get(id) || 0,
     })),
     edges: Object.entries(meta.inputs).flatMap(([from, input]) =>
-      (input.imports || [])
+      imports(input)
         .filter((i) => !i.external)
         .map((i) => ({
           from,
