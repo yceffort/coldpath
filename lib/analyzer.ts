@@ -38,6 +38,15 @@ export function runAnalyzer(args: string[]) {
   const binary = analyzerPath()
   const result = spawnSync(binary, args, {stdio: 'inherit'})
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+    // The prebuilt analyzer is linked against glibc, so on musl it fails to start with ENOENT for its missing loader
+    // although the file is installed. Node's report names the glibc it runs on, and the field is absent on musl.
+    if (
+      process.platform === 'linux' &&
+      !(process.report.getReport() as {header: {glibcVersionRuntime?: string}}).header.glibcVersionRuntime
+    )
+      throw new Error(
+        `No Rust analyzer that runs here (${binary}). The prebuilt analyzer needs glibc and this system uses musl (Alpine). Build the analyzer from source with Rust 1.88 or newer (cargo install --git https://github.com/yceffort/coldpath --locked) and set COLDPATH_ANALYZER to its path.`,
+      )
     throw new Error(
       `Rust analyzer not found (${binary}). Install @yceffort/coldpath-${process.platform}-${process.arch}, set COLDPATH_ANALYZER, or install the native coldpath binary on PATH.`,
     )
