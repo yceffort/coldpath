@@ -69,10 +69,10 @@ struct Args {
     #[serde(default)]
     max_cpu_regressions: Option<usize>,
     /// An HTML document of the build; the bundles it names form the initial load, reported
-    /// as initialLoad without a browser.
+    /// as initialLoad without a browser. Repeat for several pages; budgets apply to each.
     #[arg(long, value_name = "FILE")]
-    #[serde(default)]
-    initial_html: Option<PathBuf>,
+    #[serde(default, deserialize_with = "one_or_more")]
+    initial_html: Vec<PathBuf>,
     /// Fail when the bytes of the bundles --initial-html names exceed this budget.
     #[arg(long, requires = "initial_html")]
     #[serde(default)]
@@ -188,6 +188,22 @@ struct Args {
     file_url_root: Option<PathBuf>,
 }
 
+/// Evidence from before `--initial-html` was repeatable records one path or `null`.
+fn one_or_more<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Vec<PathBuf>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Paths {
+        One(Option<PathBuf>),
+        More(Vec<PathBuf>),
+    }
+    Ok(match Paths::deserialize(deserializer)? {
+        Paths::One(path) => path.into_iter().collect(),
+        Paths::More(paths) => paths,
+    })
+}
+
 impl Args {
     /// Options that shape the analysis, without outputs or comparisons.
     fn analysis(&self) -> Result<serde_json::Value> {
@@ -228,7 +244,6 @@ impl Args {
             &mut self.config,
             &mut self.labels,
             &mut self.loading,
-            &mut self.initial_html,
         ] {
             apply(path)?;
         }
@@ -237,6 +252,7 @@ impl Args {
             .iter_mut()
             .chain(&mut self.profile)
             .chain(&mut self.diff)
+            .chain(&mut self.initial_html)
         {
             *path = f(path)?;
         }
@@ -489,7 +505,6 @@ fn export(
         (&mut inv.graph, "graph", false),
         (&mut inv.labels, "labels", false),
         (&mut inv.loading, "loading", false),
-        (&mut inv.initial_html, "initial-html", false),
     ] {
         if let Some(value) = path.take() {
             if excerpt && !required {
@@ -497,6 +512,15 @@ fn export(
             } else {
                 *path = Some(writer.input(&value, role)?.into());
             }
+        }
+    }
+    inv.initial_html = Vec::new();
+    for path in &args.initial_html {
+        if excerpt {
+            writer.omit(path, "initial-html")?;
+        } else {
+            inv.initial_html
+                .push(writer.input(path, "initial-html")?.into());
         }
     }
     writer.finish(
@@ -799,12 +823,12 @@ fn main() -> Result<()> {
         report.totals.unmeasured_bytes
     );
     status!("Unobserved means not executed during the supplied scenarios, not safe to delete.\n");
-    if let Some(load) = &report.initial_load {
+    for page in report.initial_load.iter().flat_map(|load| load.pages()) {
         status!(
             "Initial load named by {}: {} bytes in {} bundles",
-            load.html,
-            load.bytes,
-            load.bundles.len()
+            page.html,
+            page.bytes,
+            page.bundles.len()
         );
     }
     if let Some(comparison) = &report.baseline {
@@ -813,12 +837,22 @@ fn main() -> Result<()> {
             comparison.totals.delta.bytes
         );
         if let Some(load) = &comparison.initial_load {
-            status!(
-                "Initial load change: {:+} bytes ({} bundles added, {} removed)",
-                load.delta_bytes,
-                load.added_bundles.len(),
-                load.removed_bundles.len()
-            );
+            let pages = if load.pages.is_empty() {
+                vec![(String::new(), load)]
+            } else {
+                load.pages
+                    .iter()
+                    .map(|page| (format!(" of {}", page.html), &page.change))
+                    .collect()
+            };
+            for (name, load) in pages {
+                status!(
+                    "Initial load change{name}: {:+} bytes ({} bundles added, {} removed)",
+                    load.delta_bytes,
+                    load.added_bundles.len(),
+                    load.removed_bundles.len()
+                );
+            }
         }
         for scenario in &comparison.scenarios {
             status!(

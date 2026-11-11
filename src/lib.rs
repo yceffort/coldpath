@@ -90,12 +90,27 @@ pub const COVERAGE_MODE: &str = "coverage";
 
 /// The selected bundles one HTML document names, from `--initial-html`: what a browser would
 /// load for that document before any interaction.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitialLoad {
     pub html: String,
     pub bytes: usize,
     pub bundles: Vec<String>,
+    /// With several documents, each one in the order given; the fields above then describe
+    /// the largest, so a reader of one document's report reads the heaviest initial load.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<InitialLoad>,
+}
+
+impl InitialLoad {
+    /// Every document: `pages`, or this one alone.
+    pub fn pages(&self) -> &[InitialLoad] {
+        if self.pages.is_empty() {
+            std::slice::from_ref(self)
+        } else {
+            &self.pages
+        }
+    }
 }
 
 /// Unmeasured bytes by bundle and reason. A bundle is unmeasured when no recording loaded it.
@@ -448,8 +463,8 @@ pub struct AnalyzeOptions {
     pub details: bool,
     /// `coldpath profile` files; CPU results stay apart from byte metrics.
     pub profiles: Vec<PathBuf>,
-    /// An HTML document whose named bundles form the initial load.
-    pub initial_html: Option<PathBuf>,
+    /// HTML documents; the bundles each one names form its initial load.
+    pub initial_html: Vec<PathBuf>,
     /// The two coverage files are recordings to compare; `input.scenario_names` names them.
     pub diff: bool,
 }
@@ -468,7 +483,7 @@ impl Default for AnalyzeOptions {
             compression: false,
             details: true,
             profiles: Vec::new(),
-            initial_html: None,
+            initial_html: Vec::new(),
             diff: false,
         }
     }
@@ -1497,15 +1512,29 @@ pub fn analyze_with_options(
     report.unmapped.bytes = report.unmapped.bytes_without_map + report.unmapped.gap_bytes;
     report.unmeasured.bytes = report.totals.unmeasured_bytes;
     sort_unmeasured(&mut report.unmeasured.bundles);
-    if let Some(html) = &options.initial_html {
-        report.initial_load = Some(initial_load(html, &report.bundles)?);
-        if report.initial_load.as_ref().unwrap().bundles.is_empty() {
+    let mut pages: Vec<InitialLoad> = Vec::new();
+    for html in &options.initial_html {
+        let page = initial_load(html, &report.bundles)?;
+        ensure!(
+            !pages.iter().any(|p| p.html == page.html),
+            "--initial-html {} is given twice",
+            html.display()
+        );
+        if page.bundles.is_empty() {
             report.warnings.push(format!(
                 "--initial-html {} names none of the analyzed bundles; the initial load is empty. Check that the document references bundles under the analysis root.",
                 html.display()
             ));
         }
+        pages.push(page);
     }
+    report.initial_load = if pages.len() > 1 {
+        // The first of equally large documents.
+        let largest = pages.iter().rev().max_by_key(|p| p.bytes).unwrap().clone();
+        Some(InitialLoad { pages, ..largest })
+    } else {
+        pages.pop()
+    };
     (report.sources, report.packages) = aggregate_sources(source_counts);
     let mut copies: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     for source in report.bundles.iter().flat_map(|bundle| &bundle.sources) {
@@ -1700,6 +1729,7 @@ fn initial_load(html: &Path, bundles: &[BundleRow]) -> Result<InitialLoad> {
         html: html.to_string_lossy().replace('\\', "/"),
         bytes,
         bundles: named,
+        pages: Vec::new(),
     })
 }
 

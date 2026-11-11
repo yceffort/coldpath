@@ -33,6 +33,40 @@ pub struct InitialLoadChange {
     pub delta_bytes: i128,
     pub added_bundles: Vec<String>,
     pub removed_bundles: Vec<String>,
+    /// When either report has several documents: each document both have, matched by `html`.
+    /// The fields above then compare the largest document of each.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<InitialPageChange>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InitialPageChange {
+    pub html: String,
+    #[serde(flatten)]
+    pub change: InitialLoadChange,
+}
+
+impl InitialLoadChange {
+    fn new(before: &InitialLoadSnapshot, after: &crate::InitialLoad) -> Self {
+        Self {
+            before_bytes: before.bytes,
+            after_bytes: after.bytes,
+            delta_bytes: after.bytes as i128 - before.bytes as i128,
+            added_bundles: after
+                .bundles
+                .iter()
+                .filter(|path| !before.bundles.contains(path))
+                .cloned()
+                .collect(),
+            removed_bundles: before
+                .bundles
+                .iter()
+                .filter(|path| !after.bundles.contains(path))
+                .cloned()
+                .collect(),
+            pages: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -87,8 +121,11 @@ struct Snapshot {
 
 #[derive(Deserialize)]
 struct InitialLoadSnapshot {
+    html: String,
     bytes: usize,
     bundles: Vec<String>,
+    #[serde(default)]
+    pages: Vec<InitialLoadSnapshot>,
 }
 
 #[derive(Deserialize)]
@@ -358,23 +395,39 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
         (None, None) => None,
     };
     let initial_load = match (&baseline.initial_load, &report.initial_load) {
-        (Some(before), Some(after)) => Some(InitialLoadChange {
-            before_bytes: before.bytes,
-            after_bytes: after.bytes,
-            delta_bytes: after.bytes as i128 - before.bytes as i128,
-            added_bundles: after
-                .bundles
-                .iter()
-                .filter(|path| !before.bundles.contains(path))
-                .cloned()
-                .collect(),
-            removed_bundles: before
-                .bundles
-                .iter()
-                .filter(|path| !after.bundles.contains(path))
-                .cloned()
-                .collect(),
-        }),
+        (Some(before), Some(after)) => {
+            let mut change = InitialLoadChange::new(before, after);
+            // One document on each side compares whatever its path, as before --initial-html was
+            // repeatable; with more, the paths given tell the documents apart.
+            if !before.pages.is_empty() || !after.pages.is_empty() {
+                let before_pages = if before.pages.is_empty() {
+                    std::slice::from_ref(before)
+                } else {
+                    &before.pages
+                };
+                for page in after.pages() {
+                    match before_pages.iter().find(|p| p.html == page.html) {
+                        Some(base) => change.pages.push(InitialPageChange {
+                            html: page.html.clone(),
+                            change: InitialLoadChange::new(base, page),
+                        }),
+                        None => warnings.push(format!(
+                            "The baseline has no initial load of {}; its initial-load bytes are not compared.",
+                            page.html
+                        )),
+                    }
+                }
+                for base in before_pages {
+                    if !after.pages().iter().any(|p| p.html == base.html) {
+                        warnings.push(format!(
+                            "Only the baseline has an initial load of {}; pass it with --initial-html to compare it.",
+                            base.html
+                        ));
+                    }
+                }
+            }
+            Some(change)
+        }
         (None, Some(_)) => {
             warnings.push(
                 "The baseline has no initial load (it was generated without --initial-html); initial-load bytes are not compared.".into(),
