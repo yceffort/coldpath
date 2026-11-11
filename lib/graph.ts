@@ -156,6 +156,67 @@ export function importSites(code: string, filename: string): ImportSite[] {
   return sites
 }
 
+const attributes = (text: string) =>
+  new Map([...text.matchAll(/([^\s=/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+)))?/g)].map((m) => [m[1], m[2] ?? m[3] ?? m[4] ?? '']))
+
+// Vue's SFC parser reads every root block except an HTML <template> as raw text up to its end tag; templates nest.
+function vueScripts(source: string) {
+  const scripts: {start: number; end: number; attrs: Map<string, string>}[] = []
+  const root = /<!--[\s\S]*?(?:-->|$)|<([a-z][\w-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/gi
+  for (let tag; (tag = root.exec(source));) {
+    if (!tag[1] || tag[2].endsWith('/')) continue
+    const name = tag[1].toLowerCase(),
+      attrs = attributes(tag[2]),
+      start = root.lastIndex
+    const html = name === 'template' && (attrs.get('lang') ?? 'html') === 'html'
+    const end = html ? /<!--[\s\S]*?(?:-->|$)|<(\/?)template(?=[\s/>])((?:"[^"]*"|'[^']*'|[^>"'])*)>/gi : new RegExp(`</${name}\\s*>`, 'gi')
+    end.lastIndex = start
+    let depth = 1,
+      match
+    while (depth && (match = end.exec(source))) {
+      if (!html || match[1]) depth--
+      else if (!match[0].startsWith('<!--') && !match[2].endsWith('/')) depth++
+    }
+    // Past an unclosed block nothing is known to be a root block.
+    if (!match) return []
+    if (name === 'script') scripts.push({start, end: match.index, attrs})
+    root.lastIndex = end.lastIndex
+  }
+  return scripts
+}
+
+// Svelte takes one instance and one module script from the top level, and a <script> in markup, such as in <svelte:head>, is an element.
+// Scripts with attributes that a top-level one does not take are left out, and a second candidate of a kind leaves the top-level one unknown.
+function svelteScripts(source: string) {
+  const scripts: {start: number; end: number; attrs: Map<string, string>}[] = []
+  const kinds = new Set<boolean>()
+  for (const m of source.matchAll(/<!--[\s\S]*?(?:-->|$)|<(script|style)(?=[\s/>])((?:"[^"]*"|'[^']*'|[^>"'])*)>([\s\S]*?)<\/\1\s*>/gi)) {
+    if (m[1]?.toLowerCase() !== 'script') continue
+    const attrs = attributes(m[2])
+    if ([...attrs.keys()].some((name) => !['context', 'generics', 'lang', 'module'].includes(name))) continue
+    const module = attrs.has('module') || attrs.get('context') === 'module'
+    if (kinds.has(module)) return []
+    kinds.add(module)
+    const start = m.index + m[1].length + m[2].length + 2
+    scripts.push({start, end: start + m[3].length, attrs})
+  }
+  return scripts
+}
+
+// Import sites in the script blocks of a Vue or Svelte component. A block is parsed with the text before it blanked out, line breaks kept,
+// so locations are positions in the component file. A block that does not parse gives none.
+export function componentSites(source: string, filename: string): ImportSite[] {
+  return (filename.endsWith('.vue') ? vueScripts(source) : svelteScripts(source)).flatMap(({start, end, attrs}) => {
+    const lang = attrs.get('lang') ?? 'js'
+    if (!/^[jt]sx?$/.test(lang)) return []
+    try {
+      return importSites(source.slice(0, start).replace(/[^\r\n]/g, ' ') + source.slice(start, end), `${filename}.${lang}`)
+    } catch {
+      return []
+    }
+  })
+}
+
 // Node's require conditions (module-sync included) and realpath; exportedFiles covers a file the bundler chose under other conditions.
 function resolvePackage(importer: string, specifier: string) {
   try {

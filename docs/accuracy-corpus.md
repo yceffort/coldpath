@@ -1,12 +1,14 @@
 # Real-build accuracy corpus
 
-Snapshot measured locally on macOS with Node 24.20.0 on 2026-10-06. Reproduce with `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, and `pnpm test:corpus`. CI repeats the corpus on Linux/macOS with Node 24 and on Linux with Node 22.12. These checks measure agreement with an independent source-map oracle and known-origin literal probes, not exact semantic ownership of every minified byte.
+Snapshot measured locally on macOS with Node 24.20.0 on 2026-11-11. Reproduce with `pnpm install --frozen-lockfile`, `pnpm exec playwright install chromium`, and `pnpm test:corpus`. CI repeats the corpus on Linux/macOS with Node 24 and on Linux with Node 22.12. These checks measure agreement with an independent source-map oracle and known-origin literal probes, not exact semantic ownership of every minified byte.
 
 | Build | Version | Generated B | Source-map oracle disagreement | Known-origin probe errors | Scenario/bundle checks |
 | --- | --- | ---: | ---: | ---: | ---: |
 | esbuild | 0.28.2 | 1550 | 0.0000% | 0.0000% (0/67 B) | 5 |
 | rollup | 4.64.0 | 1487 | 0.0000% | 0.0000% (0/67 B) | 4 |
 | vite | 8.3.2 | 3490 | 0.0000% | 0.0000% (0/67 B) | 4 |
+| vue | 3.5.45 | 65076 | 0.0000% | 0.0000% (0/67 B) | 4 |
+| svelte | 5.57.3 | 28802 | 0.0000% | 0.0000% (0/67 B) | 4 |
 | webpack | 5.111.1 | 2896 | 0.0000% | 0.0000% (0/67 B) | 4 |
 | next-turbopack | 16.3.8 | 426190 | 0.0000% | 32.8358% (22/67 B) | 17 |
 
@@ -24,6 +26,6 @@ Next's maps also contain duplicate generated coordinates. Under coldpath's docum
 
 Each real build has an initially executed source, a statically imported chart action, a dynamically imported search action, and an unvisited action. Outputs include nested chunk directories and Unicode. Three sequential native V8 snapshots record `initial`, `open-report`, and `search`; missing scripts remain unmeasured. Every captured generated UTF-16 offset is checked against an independent pointwise execution oracle; UTF-8 ownership is checked with `@jridgewell/trace-mapping`. First-observation contributions must conserve union-observed bytes.
 
-The graph checks require the actual fixture's chart import line (entry line 2 / Next page line 4), and its dynamic search import line (entry line 7 / Next page line 12). webpack module concatenation remains enabled. A negative control relabels `startup.js` while preserving all byte totals; both source-map and known-origin checks must detect it. This ensures byte conservation alone cannot make the corpus pass.
+The graph checks require the actual fixture's chart import line (entry line 2 / Next page line 4), and its dynamic search import line (entry line 7 / Next page line 12). The vue and svelte rows are Vite 8.3.2 builds with `@vitejs/plugin-vue` 6.0.10 and `@sveltejs/vite-plugin-svelte` 7.3.1, and their version column is the framework's. There these imports sit in a component's script blocks, so the checked lines are lines of the component file: `App.vue` lines 11 and 19, with a `<script>` and a TypeScript `<script setup>`, and `Report.svelte` lines 7 and 15, with a `<script module>`. webpack module concatenation remains enabled. A negative control relabels `startup.js` while preserving all byte totals; both source-map and known-origin checks must detect it. This ensures byte conservation alone cannot make the corpus pass.
 
 Generated build files, native captures, JSON reports, graphs, interactive HTML, and fresh metrics stay in `artifacts/accuracy-corpus/`. Only source fixtures, explicit probe-error budgets, and this measured snapshot are versioned. CPU cost, network loading times, all possible bundler options, and arbitrary third-party map quality are outside the measured claims.

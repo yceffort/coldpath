@@ -14,6 +14,8 @@ import {build as esbuild} from 'esbuild'
 import {rollup} from 'rollup'
 import commonjsPlugin from '@rollup/plugin-commonjs'
 import {build as vite} from 'vite'
+import vuePlugin from '@vitejs/plugin-vue'
+import {svelte as sveltePlugin} from '@sveltejs/vite-plugin-svelte'
 import webpack from 'webpack'
 import {AnyMap, originalPositionFor, decodedMappings, LEAST_UPPER_BOUND} from '@jridgewell/trace-mapping'
 import graphPlugin from '@yceffort/coldpath/rollup'
@@ -31,7 +33,20 @@ const work = join(root, 'artifacts/accuracy-corpus')
 const project = join(work, 'project')
 await rm(work, {recursive: true, force: true})
 await mkdir(join(project, 'src'), {recursive: true})
-for (const file of ['entry.js', 'startup.js', 'chart.js', 'register.js', 'mixed.js', 'legacy.cjs', 'search.js', 'page.jsx']) {
+for (const file of [
+  'entry.js',
+  'startup.js',
+  'chart.js',
+  'register.js',
+  'mixed.js',
+  'legacy.cjs',
+  'search.js',
+  'page.jsx',
+  'vue.js',
+  'App.vue',
+  'svelte.js',
+  'Report.svelte',
+]) {
   await copyFile(join(root, 'fixtures/corpus', file), join(project, 'src', file))
 }
 await writeFile(join(project, 'package.json'), JSON.stringify({name: 'coldpath-accuracy-corpus', private: true, type: 'module'}))
@@ -100,6 +115,29 @@ await vite({
   },
 })
 await finish('vite', viteDir, null)
+
+// Components whose imports sit in script blocks: Vue compiles a TypeScript script into a virtual module.
+for (const [name, plugin] of [
+  ['vue', vuePlugin()],
+  ['svelte', sveltePlugin()],
+] as const) {
+  const dir = join(work, name)
+  await vite({
+    root: project,
+    logLevel: 'warn',
+    plugins: [vitePlugin(), plugin],
+    build: {
+      outDir: dir,
+      emptyOutDir: true,
+      sourcemap: true,
+      rollupOptions: {
+        input: join(project, `src/${name}.js`),
+        output: {entryFileNames: 'entry/main.js', chunkFileNames: 'chunks/deep/[name]-[hash].js'},
+      },
+    },
+  })
+  await finish(name, dir, 'entry/main.js')
+}
 
 const webpackDir = join(work, 'webpack')
 const compiler = webpack({
@@ -383,17 +421,19 @@ try {
         }
       const chart = report.importPaths.find((p: {source: string}) => p.source.endsWith('/chart.js'))
       const search = report.importPaths.find((p: {source: string}) => p.source.endsWith('/search.js'))
+      // Lines in the importing file: entry.js, page.jsx, App.vue, or Report.svelte.
+      const [chartLine, searchLine] = {'next-turbopack': [4, 13], vue: [11, 19], svelte: [7, 15]}[artifact.name] ?? [2, 10]
       assert(
         chart?.edges.some(
           (edge: {to: string; kind: string; location?: {line: number}}) =>
-            edge.to.endsWith('/chart.js') && edge.kind === 'static' && edge.location?.line === (next ? 4 : 2),
+            edge.to.endsWith('/chart.js') && edge.kind === 'static' && edge.location?.line === chartLine,
         ),
         artifact.name + ': static chart import location',
       )
       assert(
         search?.edges.some(
           (edge: {to: string; kind: string; location?: {line: number}}) =>
-            edge.to.endsWith('/search.js') && edge.kind === 'dynamic' && edge.location?.line === (next ? 13 : 10),
+            edge.to.endsWith('/search.js') && edge.kind === 'dynamic' && edge.location?.line === searchLine,
         ),
         artifact.name + ': dynamic search boundary/location',
       )
@@ -401,7 +441,7 @@ try {
         report.recommendations.find(
           (r: {scenario: string; source: string}) => r.scenario === 'open-report' && r.source.endsWith('/' + file),
         )?.kind
-      if (artifact.name === 'vite' || artifact.name === 'webpack') {
+      if (['vite', 'vue', 'svelte', 'webpack'].includes(artifact.name)) {
         assert.equal(action('chart.js'), 'defer-review', artifact.name + ': functions-only module')
         assert.equal(action('register.js'), 'split-review', artifact.name + ': top-level registration')
         assert.equal(action('mixed.js'), 'split-review', artifact.name + ': function called initially')

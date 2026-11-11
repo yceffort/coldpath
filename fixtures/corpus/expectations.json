@@ -2,6 +2,8 @@
   "esbuild": { "maxMarkerErrorBytes": 0 },
   "rollup": { "maxMarkerErrorBytes": 0 },
   "vite": { "maxMarkerErrorBytes": 0 },
+  "vue": { "maxMarkerErrorBytes": 0 },
+  "svelte": { "maxMarkerErrorBytes": 0 },
   "webpack": { "maxMarkerErrorBytes": 0 },
   "next-turbopack": { "maxMarkerErrorBytes": 22 }
 }
