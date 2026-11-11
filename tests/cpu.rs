@@ -609,6 +609,7 @@ fn cpu_budget_counts_regressions_and_never_passes_an_inconclusive_comparison() {
             ..Default::default()
         }
         .check_comparison(after, &comparison)
+        .unwrap()
     };
     let before = report("before.json", steady, &same);
     let slow = report("slow.json", slower, &same);

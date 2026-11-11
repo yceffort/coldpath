@@ -11,6 +11,9 @@ pub struct Comparison {
     pub sources: Vec<Change>,
     pub packages: Vec<Change>,
     pub bundles: Vec<Change>,
+    /// With `--group-by`: the baseline's sources grouped by the same patterns.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<Change>,
     pub scenarios: Vec<ScenarioComparison>,
     /// Present when both reports were given `--initial-html`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -167,6 +170,13 @@ fn rows<'a>(
         );
         validate_counts(name, &row.counts)?;
     }
+    Ok(changes(previous, after))
+}
+
+fn changes<'a>(
+    mut previous: BTreeMap<&str, &Counts>,
+    after: impl Iterator<Item = (&'a str, &'a Counts)>,
+) -> Vec<Change> {
     let mut result = after
         .map(|(name, counts)| Change::new(name.into(), previous.remove(name), Some(counts)))
         .collect::<Vec<_>>();
@@ -176,7 +186,7 @@ fn rows<'a>(
             .map(|(name, counts)| Change::new(name.into(), Some(counts), None)),
     );
     result.sort_by(|a, b| b.delta.bytes.cmp(&a.delta.bytes).then(a.name.cmp(&b.name)));
-    Ok(result)
+    result
 }
 
 fn validate_counts(name: &str, counts: &Counts) -> Result<()> {
@@ -379,15 +389,36 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
         }
         (None, None) => None,
     };
-    Ok(Comparison {
-        totals: Change::new("total".into(), Some(&baseline.totals), Some(&report.totals)),
-        sources: rows(
-            &baseline.sources,
-            report
+    let sources = rows(
+        &baseline.sources,
+        report
+            .sources
+            .iter()
+            .map(|r| (r.source.as_str(), &r.counts)),
+    )?;
+    // The baseline's sources rather than its `groups`, so that a baseline made without
+    // --group-by, or with other patterns, is grouped like this report.
+    let groups = if report.group_by.is_empty() {
+        Vec::new()
+    } else {
+        let before = crate::group_rows(
+            &report.group_by,
+            baseline
                 .sources
                 .iter()
-                .map(|r| (r.source.as_str(), &r.counts)),
-        )?,
+                .filter_map(|row| Some((row.source.as_deref()?, &row.counts, None))),
+        )?;
+        changes(
+            before
+                .iter()
+                .map(|g| (g.group.as_str(), &g.counts))
+                .collect(),
+            report.groups.iter().map(|g| (g.group.as_str(), &g.counts)),
+        )
+    };
+    Ok(Comparison {
+        totals: Change::new("total".into(), Some(&baseline.totals), Some(&report.totals)),
+        sources,
         packages: rows(
             &baseline.packages,
             report
@@ -399,6 +430,7 @@ pub fn compare(report: &Report, data: &[u8]) -> Result<Comparison> {
             &baseline.bundles,
             report.bundles.iter().map(|r| (r.path.as_str(), &r.counts)),
         )?,
+        groups,
         scenarios,
         initial_load,
         warnings,
