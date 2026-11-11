@@ -118,7 +118,9 @@ function runtimeModules(program: AstNode): {global: string | null; modules: Reco
 // webpack: `(self.webpackChunkX = self.webpackChunkX || []).push([[chunkIds], {id: factory} | [factory]])`; webpack 4 uses
 // `this.webpackJsonp`. A renamed global (`output.chunkLoadingGlobal`, webpack 4 `jsonpFunction`) is recognized when
 // every module is a function. Entry chunks: see runtimeModules.
-// Turbopack: `(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([currentScript, id, factory, id, factory, ...])`
+// Turbopack: `(globalThis.TURBOPACK || (globalThis.TURBOPACK = [])).push([currentScript, id, factory, id, factory, ...])`.
+// Next.js 16.4 can put an array of more modules, in the same form, right after the script, and can wrap the whole
+// registration in `(() => {"use strict"; ...})()`.
 export function chunkModules(code: string): {global: string | null; modules: RecoveredModule[]; runtime?: true} | null {
   let ast
   try {
@@ -127,7 +129,15 @@ export function chunkModules(code: string): {global: string | null; modules: Rec
     return null
   }
   // A prelude such as Sentry's debug-id snippet can join the registration with a comma: `!function(){...}(),(self.X=...).push(...)`.
-  const calls = ast.program.body.flatMap(({expression: e}: AstNode) => (e?.type === 'SequenceExpression' ? e.expressions : [e]))
+  const expressions = (statements: AstNode[]): AstNode[] =>
+    statements.flatMap(({expression: e}: AstNode) =>
+      e?.type === 'CallExpression' && !e.arguments.length && e.callee.body?.body?.length === 1
+        ? expressions(e.callee.body.body)
+        : e?.type === 'SequenceExpression'
+          ? e.expressions
+          : [e],
+    )
+  const calls = expressions(ast.program.body)
   for (const call of calls) {
     if (call?.type !== 'CallExpression' || call.callee.type !== 'MemberExpression' || call.callee.property.name !== 'push') continue
     let target = call.callee.object
@@ -136,19 +146,32 @@ export function chunkModules(code: string): {global: string | null; modules: Rec
     const global = target.type === 'MemberExpression' ? target.property.name : target.name
     const elements = call.arguments[0]?.elements
     if (global === 'TURBOPACK' && elements) {
-      const modules: RecoveredModule[] = []
-      for (let i = 1; i + 1 < elements.length; i += 2) {
-        const [id, factory] = [elements[i], elements[i + 1]]
-        if (!['NumericLiteral', 'StringLiteral'].includes(id?.type) || !/Function/.test(factory?.type)) return null
-        modules.push({id: String(id.value), header: id.start, start: factory.body.start, end: factory.end, factory})
-      }
-      return {global, modules}
+      const modules = turbopackModules(elements, 1)
+      return modules && {global, modules}
     }
     if (!global || elements?.[0]?.type !== 'ArrayExpression') continue
     const entries = tableEntries(elements[1])
     if (/^webpack(Chunk|Jsonp)/.test(global) || isModuleTable(entries)) return {global, modules: tableModules(entries)}
   }
   return runtimeModules(ast.program)
+}
+
+// Turbopack's runtime also allows several ids before one factory; that form is not read (null).
+function turbopackModules(elements: AstNode[], from: number): RecoveredModule[] | null {
+  const modules: RecoveredModule[] = []
+  let i = from
+  if (elements[i]?.type === 'ArrayExpression') {
+    const nested = turbopackModules(elements[i].elements, 0)
+    if (!nested) return null
+    modules.push(...nested)
+    i++
+  }
+  for (; i + 1 < elements.length; i += 2) {
+    const [id, factory] = [elements[i], elements[i + 1]]
+    if (!['NumericLiteral', 'StringLiteral'].includes(id?.type) || !/Function/.test(factory?.type)) return null
+    modules.push({id: String(id.value), header: id.start, start: factory.body.start, end: factory.end, factory})
+  }
+  return modules
 }
 
 const literalId = (node: AstNode) => (['NumericLiteral', 'StringLiteral'].includes(node?.type) ? String(node.value) : null)
