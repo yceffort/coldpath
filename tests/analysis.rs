@@ -360,6 +360,8 @@ fn baseline_compares_normalized_sources_additions_removals_and_scenarios() {
     let new = analyze(&after.0, &[after.0.join("initial.json")]).unwrap();
     let data = serde_json::to_vec(&old).unwrap();
     let comparison = coldpath::baseline::compare(&new, &data).unwrap();
+    // Other absolute directories and bundle names, as in the GitHub Action, warn about nothing.
+    assert!(comparison.warnings.is_empty(), "{:?}", comparison.warnings);
     assert_eq!(comparison.totals.delta.bytes, 2);
     let row = |name: &str| comparison.sources.iter().find(|r| r.name == name).unwrap();
     assert_eq!(row("src/keep.js").delta.bytes, 2);
@@ -405,6 +407,19 @@ fn baseline_compares_normalized_sources_additions_removals_and_scenarios() {
         coldpath::baseline::compare(&new, &serde_json::to_vec(&different).unwrap()).unwrap();
     assert!(comparison.scenarios.is_empty());
     assert!(!comparison.warnings.is_empty());
+    // Another --dir renames every source, so the baseline shares none of them.
+    let narrow = analyze(&after.0.join("chunks"), &[]).unwrap();
+    let wide = analyze(&after.0, &[]).unwrap();
+    assert_eq!(narrow.sources[0].source, "../src/keep.js");
+    let warnings = coldpath::baseline::compare(&wide, &serde_json::to_vec(&narrow).unwrap())
+        .unwrap()
+        .warnings;
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.starts_with("No source identity in the baseline matches")),
+        "{warnings:?}"
+    );
 }
 
 #[test]
