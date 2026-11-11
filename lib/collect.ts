@@ -291,9 +291,9 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
   })
   page.on('requestfailed', (request) => state.failedRequests.push({url: request.url(), reason: request.failure()?.errorText ?? 'unknown'}))
   // The route handler sees only the first URL of a redirect chain, so the later hops are checked here. Two sources report
-  // them, and a hop that both report counts once. Playwright's `request` event covers every frame and worker of every page,
-  // but Playwright raises none for a hop whose Fetch.requestPaused it handles before the hop's Network.requestWillBeSent
-  // (#110). Each page's own DevTools session reports every hop of that page's target once it is attached.
+  // them, and a hop that both report counts once. Playwright raises no `request` event for a hop whose Fetch.requestPaused
+  // it handles before the hop's Network.requestWillBeSent (#110), so the collector also reads that event itself from
+  // every page, frame of another site and dedicated worker.
   const hops = new Map<string, [number, number]>()
   const hop = (source: 0 | 1, from: string, to: string, type: string) => {
     const key = `${from} ${to}`
@@ -310,13 +310,43 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
     while (first.redirectedFrom()) first = first.redirectedFrom()!
     hop(0, first.url(), request.url(), request.resourceType())
   })
-  const watchRedirects = async (session: CDPSession) => {
+  // Playwright gives a session for a page only once it has reported the page, and none for a worker. The browser's
+  // session names each page as its target is created, and every target names the workers and the frames of another site
+  // that it starts. Those are reached through the session that named them, with Target.sendMessageToTarget, which needs
+  // no session of their own. No target is made to wait for this, so a hop that one follows before Network.enable has
+  // reached it is left to Playwright's event.
+  type Send = (method: string, params?: object) => Promise<unknown>
+  type Receive = (method: string, params: any) => void
+  let messages = 0
+  // Hands the events of the targets attached through `send` to a watcher each.
+  const attached = (send: Send): Receive => {
+    const watchers = new Map<string, Receive>()
+    return (method, params) => {
+      if (method === 'Target.attachedToTarget') {
+        const {sessionId} = params
+        const child: Send = (method, params = {}) =>
+          send('Target.sendMessageToTarget', {sessionId, message: JSON.stringify({id: ++messages, method, params})})
+        watchers.set(sessionId, watchRedirects(child))
+      } else if (method === 'Target.detachedFromTarget') watchers.delete(params.sessionId)
+      else if (method === 'Target.receivedMessageFromTarget') {
+        const event = JSON.parse(params.message)
+        if (event.method) watchers.get(params.sessionId)?.(event.method, event.params)
+      }
+    }
+  }
+  const watchRedirects = (send: Send): Receive => {
     const first = new Map<string, string>()
-    session.on('Network.requestWillBeSent', ({requestId, request, redirectResponse, type}) => {
-      if (redirectResponse) hop(1, first.get(requestId) ?? redirectResponse.url, request.url, (type ?? 'Other').toLowerCase())
-      else first.set(requestId, request.url)
-    })
-    await session.send('Network.enable')
+    const targets = attached(send)
+    // A target that has gone has nothing left to watch.
+    send('Network.enable').catch(() => {})
+    send('Target.setAutoAttach', {autoAttach: true, waitForDebuggerOnStart: false, flatten: false}).catch(() => {})
+    return (method, params) => {
+      if (method !== 'Network.requestWillBeSent') return targets(method, params)
+      const {requestId, request, redirectResponse, type} = params
+      // A chain keeps the first URL seen of it, also when the watcher attached after its first request.
+      if (!first.has(requestId)) first.set(requestId, redirectResponse?.url ?? request.url)
+      if (redirectResponse) hop(1, first.get(requestId)!, request.url, (type ?? 'Other').toLowerCase())
+    }
   }
   // WebSockets that opened a connection. One the route above closed never does, so with routeWebSocket these are
   // ones Playwright did not route, such as those workers open, or ones a setup route connected itself.
@@ -325,22 +355,30 @@ export async function open(browser: Browser, setup: Setup, {beforeunload = false
       if (!allowed.has(socketOrigin(socket.url()))) sockets.push(socket.url())
     })
   watchSockets(page)
-  context.on('page', (opened) => {
-    watchSockets(opened)
-    context
-      .newCDPSession(opened)
-      .then(watchRedirects)
-      .catch((error: Error) => {
+  context.on('page', watchSockets)
+  const devtools = await browser.newBrowserCDPSession()
+  const pages = attached((method, params) => devtools.send(method as never, params as never))
+  for (const event of ['Target.attachedToTarget', 'Target.detachedFromTarget', 'Target.receivedMessageFromTarget'] as const)
+    devtools.on(event, (params) => pages(event, params))
+  const attaching: Promise<unknown>[] = []
+  devtools.on('Target.targetCreated', ({targetInfo: {type, targetId, url}}) => {
+    if (type !== 'page') return
+    attaching.push(
+      devtools.send('Target.attachToTarget', {targetId, flatten: false}).catch((error: Error) => {
         // A page that has closed again has nothing left to watch.
-        if (!opened.isClosed())
+        if (browser.isConnected() && !error.message.includes('No target with given id'))
           console.warn(
-            `${setup.scenario}: no DevTools session on ${opened.url()}, so only Playwright reports its redirects: ${error.message.split('\n')[0]}`,
+            `${setup.scenario}: no DevTools session on ${url || 'a new page'}, so only Playwright reports its redirects: ${error.message.split('\n')[0]}`,
           )
-      })
+      }),
+    )
   })
+  // Reports the targets that exist first, so the first page is being watched once these have settled.
+  await devtools.send('Target.setDiscoverTargets', {discover: true})
+  await Promise.all(attaching)
   const cdp = await context.newCDPSession(page)
-  await watchRedirects(cdp)
   if (network) {
+    await cdp.send('Network.enable')
     await cdp.send('Network.emulateNetworkConditions', {
       offline: false,
       latency: network.latencyMs,
