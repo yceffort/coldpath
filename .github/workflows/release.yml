@@ -23,16 +23,34 @@ jobs:
             os: ubuntu-22.04
           - platform: linux-arm64
             os: ubuntu-22.04-arm
+          # Static binaries for musl distributions such as Alpine.
+          - platform: linux-x64-musl
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+          - platform: linux-arm64-musl
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-musl
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
+      # musl-gcc compiles the assembly of sha2 on arm64. CARGO_BUILD_TARGET makes the cargo steps below build and test the musl target.
+      - if: matrix.target
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          echo "CARGO_BUILD_TARGET=${{ matrix.target }}" >> "$GITHUB_ENV"
       - run: cargo test --locked --release
       - run: cargo build --locked --release
-      - run: node scripts/pack-native.ts --binary target/release/coldpath --out dist
+      - if: ${{ !matrix.target }}
+        run: node scripts/pack-native.ts --binary target/release/coldpath --out dist
+      - if: matrix.target
+        run: node scripts/pack-native.ts --binary target/${{ matrix.target }}/release/coldpath --musl --out dist
       - run: test "$(ls dist/yceffort-coldpath-${{ matrix.platform }}-*.tgz)"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

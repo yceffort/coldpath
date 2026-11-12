@@ -13,7 +13,7 @@ This skill covers apps whose build you control. For a site you cannot build (no 
 
 ## Requirements
 
-- Node.js 22.12 or newer, macOS or Linux with glibc (Windows and musl distributions such as Alpine are not supported by the prebuilt analyzer).
+- Node.js 22.12 or newer, macOS or Linux (Windows is not supported by the prebuilt analyzer). A musl distribution such as Alpine needs a version of `@yceffort/coldpath` that lists `@yceffort/coldpath-linux-<arch>-musl` in its `optionalDependencies`; an earlier one fails with a message that says how to build the analyzer.
 - `@yceffort/coldpath` 0.3.2 or newer in devDependencies (earlier versions report nearly every later-only static import as `split-review`). Collection also needs Playwright and Chromium. Before adding `playwright` to `package.json`, tell the user; `npm install --no-save playwright` is the non-invasive option for a one-off analysis. Then run `npx playwright install chromium`; coldpath launches only headless Chromium, so `--only-shell` (Playwright 1.49 or newer) is enough. An installed Chrome also works without that download: `"browserChannel": "chrome"` in the scenario file, in versions whose `npx coldpath collect --help` lists `--browser-channel`.
 - The npm package ships only the README. Full docs live at <https://github.com/yceffort/coldpath/tree/main/docs>. `npx coldpath analyze --help` lists every analyzer flag.
 
