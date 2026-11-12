@@ -89,3 +89,24 @@ jobs:
       - run: node --run test:browser
       - run: node --run test:corpus
       - run: node --run test:package
+
+  alpine:
+    name: Analyzer package on Alpine (musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The steps of the musl entries in release.yml.
+      - run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - run: cargo build --locked --release --target x86_64-unknown-linux-musl
+      - run: node scripts/pack-native.ts --binary target/x86_64-unknown-linux-musl/release/coldpath --musl --out artifacts/alpine
+      - run: npm pack --pack-destination artifacts/alpine
+      - run: docker run --rm --volume "$PWD:/repo:ro" node:24-alpine node /repo/scripts/verify-alpine.ts /repo/artifacts/alpine

@@ -2,7 +2,7 @@
 // Run only in the release job: the platform packages exist on npm only after that job publishes them.
 import {readFile, writeFile} from 'node:fs/promises'
 
-const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64']
+const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-arm64-musl', 'linux-x64', 'linux-x64-musl']
 
 const file = new URL('../package.json', import.meta.url)
 const manifest = JSON.parse(await readFile(file, 'utf8'))

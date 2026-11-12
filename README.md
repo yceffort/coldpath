@@ -26,7 +26,7 @@ Early-stage software: the CLI and JSON schema may change. Unobserved bytes are c
 npm install --save-dev @yceffort/coldpath
 ```
 
-The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64; glibc 2.35 or newer) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Windows is not supported. The prebuilt analyzer needs glibc, so on musl distributions such as Alpine build the analyzer as below and set `COLDPATH_ANALYZER` to it. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` (also for Rspack) graph plugins. Collection and CPU profiling additionally need `playwright` in your project.
+The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Linux has two for each architecture: one linked against glibc (2.35 or newer), and a static one for musl distributions such as Alpine, `@yceffort/coldpath-linux-<arch>-musl`. Windows is not supported. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` (also for Rspack) graph plugins. Collection and CPU profiling additionally need `playwright` in your project.
 
 On other platforms, or to use the analyzer without Node.js, build it with Rust 1.88 or newer:
 
@@ -52,7 +52,7 @@ coldpath collect --scenarios coldpath.scenarios.json
 coldpath analyze --scenarios coldpath.scenarios.json --graph dist/coldpath.graph.json --treemap artifacts/actions.html
 ```
 
-`coldpath analyze` (or `coldpath` with analyzer options) runs the Rust analyzer from `COLDPATH_ANALYZER`, the installed `@yceffort/coldpath-<platform>-<arch>` package, or the native `coldpath` binary on `PATH` (the npm wrapper skips itself), in that order. See [collecting coverage](docs/collecting.md#scenario-files) for the scenario file.
+`coldpath analyze` (or `coldpath` with analyzer options) runs the Rust analyzer from `COLDPATH_ANALYZER`, the installed `@yceffort/coldpath-<platform>-<arch>` package (on Linux the one for the system's libc), or the native `coldpath` binary on `PATH` (the npm wrapper skips itself), in that order. See [collecting coverage](docs/collecting.md#scenario-files) for the scenario file.
 
 ### Claude Code skill
 
