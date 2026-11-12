@@ -7,5 +7,6 @@
   "svelte": { "maxMarkerErrorBytes": 0 },
   "webpack": { "maxMarkerErrorBytes": 0 },
   "rspack": { "maxMarkerErrorBytes": 16 },
+  "parcel": { "maxMarkerErrorBytes": 16 },
   "next-turbopack": { "maxMarkerErrorBytes": 22 }
 }

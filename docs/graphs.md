@@ -105,6 +105,40 @@ Locations tagged `plugin-input` refer to the text seen by this plugin. Earlier t
 
 Vue (`.vue`) and Svelte (`.svelte`) components reach the plugin as markup or, after the framework plugin, as compiled JavaScript, so the plugin reads the component file itself and parses its script blocks in JavaScript or TypeScript (`lang="ts"`, and for Vue also `jsx` and `tsx`): Vue's `<script>` and `<script setup>`, and Svelte's instance script and `<script module>` (or `context="module"`). Their locations are lines of the component file and are tagged `parsed-source`, and the component's `sourceSha256` is that file's hash. `@vitejs/plugin-vue` compiles a TypeScript script into a virtual module such as `App.vue?vue&type=script&setup=true&lang.ts`, which stays the importer in the graph; its edges carry lines of `App.vue`. A block that does not parse, an import in a template or in markup, and an import that only the compiler adds, such as Vue's helpers for a template, have no location. A Svelte script with an attribute that a top-level script does not take (anything but `context`, `generics`, `lang`, and `module`) counts as part of the markup, and a second candidate of the same kind, such as a plain `<script>` in `<svelte:head>`, leaves the whole file without locations, because the plugin does not parse the markup to tell which one is at the top level. Checked with Vite 8.3.3, `@vitejs/plugin-vue` 6.0.10 (Vue 3.5.45), and `@sveltejs/vite-plugin-svelte` 7.3.1 (Svelte 5.57.3). Astro components are not parsed, and no Astro build is checked.
 
+## Parcel
+
+Parcel writes no metafile, so the graph comes from a reporter that reads Parcel's bundle graph when a build succeeds. Name it on the command line:
+
+```sh
+parcel build src/index.html --reporter @yceffort/coldpath/parcel
+```
+
+In `.parcelrc`, Parcel accepts a scoped package only under a name like `@scope/parcel-reporter-name`, so list a file of your project that exports the reporter again:
+
+```js
+// coldpath-reporter.mjs
+export {default} from '@yceffort/coldpath/parcel'
+```
+
+```json
+{
+  "extends": "@parcel/config-default",
+  "reporters": ["...", "./coldpath-reporter.mjs"]
+}
+```
+
+A successful build writes `coldpath.graph.json` at the top of the output directory, and a build with several targets writes one in each target's directory:
+
+```sh
+coldpath --dir dist --graph dist/coldpath.graph.json --treemap artifacts/parcel.html
+```
+
+The modules are the JavaScript assets of the bundles in that directory, which includes TypeScript files and the runtime modules that Parcel adds (`@parcel/runtime-js`). A module that only an inline `<script>` of a page contains is left out. A module is an entry when something other than a module of the graph asks for it: the build's entry, or a `<script>` of a page. The first module of a bundle that an `import()` loads is not one.
+
+Parcel's dependencies give the edges. An `import` is `static`, an `import()` is `dynamic`, a `require()` is `require`, and a URL dependency such as `new Worker(new URL('./worker.js', import.meta.url))` is `unknown`. An `import()` that loads another bundle resolves, inside its own bundle, to a runtime module, so it gets two dynamic edges: one to that runtime module and one to the module it loads. Locations come from parsing the source files and are tagged `parsed-source`. Parcel's own `loc` points at the specifier string rather than at the import, and is not used. Modules carry no `emittedBytes`: the sizes Parcel reports for the assets of a bundle add up to more than the minified bundle.
+
+Parcel names the sources of a source map from its project root, the nearest directory above the entry with a lockfile or a version control directory, which in a monorepo is the workspace root. A production build for the browser embeds the sources and writes no `sourceRoot`, so `src/app.js` in `dist/app.js.map` resolves to `dist/src/app.js`. The reporter therefore reads one map in each directory that holds bundles and records the directory its sources resolve from as the graph's root: the output directory in that case, and the project root when the map has a `sourceRoot`, as for a Node target or a target with `"sourceMap": {"inlineSources": false}`. When bundles without a `sourceRoot` sit in several directories of the output directory, as the bundles of entry points from different directories do, their sources resolve from different directories; the graph then matches one of them and carries a warning. Checked with Parcel 2.16.4.
+
 ## Next.js / Turbopack
 
 Tested with **Next.js 16.4.1**. Enable production browser source maps in Next configuration. Run the native analyzer from the same checkout as the production build:
