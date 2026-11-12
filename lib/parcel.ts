@@ -17,7 +17,7 @@ interface Dependency {
 interface Bundle {
   type: string
   filePath: string
-  target: {distDir: string}
+  target: {name: string; distDir: string}
   traverseAssets(visit: (asset: Asset) => void): void
 }
 interface BundleGraph {
@@ -32,15 +32,24 @@ interface BundleGraph {
     bundle: Bundle,
   ): {type: 'bundle_group'; value: {entryAssetId: string}} | {type: 'asset'; value: Asset} | null | undefined
 }
+interface FileSystem {
+  readFile(path: string, encoding: 'utf8'): Promise<string>
+  writeFile(path: string, contents: string): Promise<unknown>
+}
 interface ReportArguments {
   event: {type: string; bundleGraph?: BundleGraph}
-  options: {
-    projectRoot: string
-    outputFS: {readFile(path: string, encoding: 'utf8'): Promise<string>; writeFile(path: string, contents: string): Promise<unknown>}
-  }
+  options: {projectRoot: string; outputFS: FileSystem}
 }
 
 const fileName = 'coldpath.graph.json'
+
+// The map beside a bundle, or the one in the bundle that a target with sourceMap.inline gets.
+async function sourceMap(bundle: string, fs: FileSystem): Promise<{sourceRoot?: unknown} | null> {
+  const beside = await fs.readFile(bundle + '.map', 'utf8').catch(() => null)
+  if (beside !== null) return JSON.parse(beside)
+  const inline = /\/\/# sourceMappingURL=data:application\/json;charset=utf-8;base64,(\S+)\s*$/.exec(await fs.readFile(bundle, 'utf8'))
+  return inline && JSON.parse(Buffer.from(inline[1], 'base64').toString())
+}
 
 async function report({event, options}: ReportArguments) {
   if (event.type !== 'buildSuccess') return
@@ -100,14 +109,16 @@ async function report({event, options}: ReportArguments) {
     const graph: Graph = {schemaVersion: 1, bundler: 'parcel', modules: [...modules.values()], edges: [...edges.values()], warnings: []}
     // Parcel names the sources of a map from the project root. A production build for the browser writes no sourceRoot,
     // so the analyzer resolves them from the directory of the bundle, and the graph must name that directory as its root.
-    const roots = new Map<string, string>()
+    // Whether a map has a sourceRoot is an option of the target, so one map is read for each target in each directory.
+    const roots = new Map<string, string | null>()
     for (const bundle of bundles) {
       const directory = dirname(bundle.filePath)
-      if (bundle.type !== 'js' || roots.has(directory)) continue
-      const map = await options.outputFS.readFile(bundle.filePath + '.map', 'utf8').then(JSON.parse, () => null)
-      if (map) roots.set(directory, resolve(directory, typeof map.sourceRoot === 'string' ? map.sourceRoot : '.'))
+      const key = bundle.target.name + '\0' + directory
+      if (bundle.type !== 'js' || roots.has(key)) continue
+      const map = await sourceMap(bundle.filePath, options.outputFS)
+      roots.set(key, map && resolve(directory, typeof map.sourceRoot === 'string' ? map.sourceRoot : '.'))
     }
-    const [mapped = root, ...others] = new Set(roots.values())
+    const [mapped = root, ...others] = new Set([...roots.values()].filter((directory) => directory !== null))
     if (others.length)
       graph.warnings.push(
         `Parcel's source maps resolve their sources from ${others.length + 1} directories (${[mapped, ...others].map((directory) => slash(relative(distDir, directory)) || '.').join(', ')} in the output directory), and the graph matches only the first. Set the target's sourceMap.inlineSources to false so that Parcel writes a sourceRoot.`,

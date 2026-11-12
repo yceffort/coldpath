@@ -218,8 +218,8 @@ await writeFile(
 parcel(project, 'parcel/index.html', '--dist-dir', parcelDir)
 await finish('parcel', parcelDir, null, undefined, parcelDir)
 
-// What the corpus build lacks: a TypeScript entry, require() calls, a worker, and a second target, whose maps have a
-// sourceRoot. Parcel reads the targets from the package.json of the directory it runs in.
+// What the corpus build lacks: a TypeScript entry, require() calls, a worker, and more targets: one whose maps have a
+// sourceRoot and one whose maps are inline. Parcel reads the targets from the package.json of the directory it runs in.
 type ParcelGraph = Parameters<typeof enrichLocations>[0]
 const parcelGraph = async (dir: string) => {
   const graph: ParcelGraph = JSON.parse(await readFile(join(dir, 'coldpath.graph.json'), 'utf8'))
@@ -249,16 +249,17 @@ await save(join(project, 'parcel-cases/package.json'), {
   targets: {
     one: {distDir: join(work, 'parcel-cases/one')},
     two: {distDir: join(work, 'parcel-cases/two'), sourceMap: {inlineSources: false}},
+    three: {distDir: join(work, 'parcel-cases/three'), sourceMap: {inline: true}},
   },
 })
 parcel(join(project, 'parcel-cases'), 'index.html')
-for (const target of ['one', 'two']) {
+for (const target of ['one', 'two', 'three']) {
   const dir = join(work, 'parcel-cases', target)
   const {graph, entries, edges} = await parcelGraph(dir)
   // The lockfile makes the repository Parcel's project root.
   assert.equal(
     resolve(dir, graph.root!),
-    target === 'one' ? dir : resolve(root),
+    target === 'two' ? resolve(root) : dir,
     `parcel ${target}: the root its maps resolve sources from`,
   )
   assert.deepEqual(entries, ['main.ts'], `parcel ${target}: neither a required module nor a worker is an entry`)
@@ -279,6 +280,21 @@ parcel(project, 'parcel-nested/deep/one.js', 'parcel-nested/two.js', '--dist-dir
 const nested = await parcelGraph(join(work, 'parcel-nested'))
 assert.deepEqual(nested.entries.toSorted(), ['one.js', 'two.js'])
 assert.match(nested.graph.warnings.join('\n'), /resolve their sources from 2 directories/)
+// So do two targets that share an output directory when only one of them writes a sourceRoot.
+await mkdir(join(project, 'parcel-shared'))
+await writeFile(join(project, 'parcel-shared/a.html'), '<!doctype html><script type="module" src="../src/startup.js"></script>')
+await writeFile(join(project, 'parcel-shared/b.html'), '<!doctype html><script type="module" src="../src/search.js"></script>')
+await save(join(project, 'parcel-shared/package.json'), {
+  private: true,
+  targets: {
+    a: {source: 'a.html', distDir: join(work, 'parcel-shared')},
+    b: {source: 'b.html', distDir: join(work, 'parcel-shared'), sourceMap: {inlineSources: false}},
+  },
+})
+parcel(join(project, 'parcel-shared'))
+const shared = await parcelGraph(join(work, 'parcel-shared'))
+assert.deepEqual(shared.entries.toSorted(), ['search.js', 'startup.js'])
+assert.match(shared.graph.warnings.join('\n'), /resolve their sources from 2 directories/)
 
 const nextProject = join(project, 'next')
 await mkdir(join(nextProject, 'pages'), {recursive: true})
