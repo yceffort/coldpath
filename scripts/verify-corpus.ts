@@ -5,7 +5,7 @@ import type {ChildProcess} from 'node:child_process'
 import {createServer} from 'node:http'
 import type {Server} from 'node:http'
 import type {AddressInfo} from 'node:net'
-import {mkdir, readFile, writeFile, copyFile, rm} from 'node:fs/promises'
+import {mkdir, readdir, readFile, writeFile, copyFile, rm} from 'node:fs/promises'
 import {resolve, join, dirname, relative} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {createRequire} from 'node:module'
@@ -272,6 +272,11 @@ for (const target of ['one', 'two', 'three']) {
   ])
     assert(edges.includes(edge), `parcel ${target}: no edge ${edge} among ${edges.join(', ')}`)
 }
+// A map file that an earlier build left beside a bundle must not stand in for the inline map the bundle has now.
+const inlineDir = join(work, 'parcel-cases/three')
+for (const file of await readdir(inlineDir)) if (file.endsWith('.js')) await save(join(inlineDir, file + '.map'), {sourceRoot: '../'})
+parcel(join(project, 'parcel-cases'), 'index.html', '--target', 'three')
+assert.equal(resolve(inlineDir, (await parcelGraph(inlineDir)).graph.root!), inlineDir, 'parcel three: a stale map file')
 // Entry points in different directories give bundles in different directories, whose maps resolve their sources from there.
 await mkdir(join(project, 'parcel-nested/deep'), {recursive: true})
 await writeFile(join(project, 'parcel-nested/deep/one.js'), "import {startup} from '../../src/startup.js'\nconsole.log(startup())\n")

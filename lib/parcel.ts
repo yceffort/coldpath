@@ -43,12 +43,12 @@ interface ReportArguments {
 
 const fileName = 'coldpath.graph.json'
 
-// The map beside a bundle, or the one in the bundle that a target with sourceMap.inline gets.
+// The map a bundle names, as the analyzer picks it: the one inside the bundle, which a target with sourceMap.inline gets,
+// before a file beside it, which an earlier build may have left.
 async function sourceMap(bundle: string, fs: FileSystem): Promise<{sourceRoot?: unknown} | null> {
-  const beside = await fs.readFile(bundle + '.map', 'utf8').catch(() => null)
-  if (beside !== null) return JSON.parse(beside)
   const inline = /\/\/# sourceMappingURL=data:application\/json;charset=utf-8;base64,(\S+)\s*$/.exec(await fs.readFile(bundle, 'utf8'))
-  return inline && JSON.parse(Buffer.from(inline[1], 'base64').toString())
+  if (inline) return JSON.parse(Buffer.from(inline[1], 'base64').toString())
+  return fs.readFile(bundle + '.map', 'utf8').then(JSON.parse, () => null)
 }
 
 async function report({event, options}: ReportArguments) {
