@@ -188,6 +188,98 @@ await new Promise((resolve, reject) =>
 await new Promise<void>((resolve, reject) => rspackCompiler.close((error) => (error ? reject(error) : resolve())))
 await finish('rspack', rspackDir, 'entry/main.js')
 
+// Parcel resolves an absolute URL from its project root, the directory of the lockfile, so its page sits in a directory
+// of its own and names the entry by a relative path. The page it builds carries the import map of its dynamic import, so
+// that page is served. A production build writes no sourceRoot, so the sources of its maps, which Parcel names from the
+// project root, resolve from the output directory, and the reporter records that directory as the graph's root.
+const parcelDir = join(work, 'parcel')
+const parcel = (cwd: string, ...args: string[]) =>
+  execFileSync(
+    process.execPath,
+    [
+      join(root, 'node_modules/parcel/lib/bin.js'),
+      'build',
+      ...args,
+      '--no-autoinstall',
+      '--no-cache',
+      // Parcel creates its cache directory in the project root even then.
+      '--cache-dir',
+      join(work, 'parcel-cache'),
+      '--reporter',
+      fileURLToPath(import.meta.resolve('@yceffort/coldpath/parcel')),
+    ],
+    {cwd, stdio: 'inherit'},
+  )
+await mkdir(join(project, 'parcel'))
+await writeFile(
+  join(project, 'parcel/index.html'),
+  '<!doctype html><meta charset="utf-8"><script type="module" src="../src/entry.js"></script>',
+)
+parcel(project, 'parcel/index.html', '--dist-dir', parcelDir)
+await finish('parcel', parcelDir, null, undefined, parcelDir)
+
+// What the corpus build lacks: a TypeScript entry, require() calls, a worker, and a second target, whose maps have a
+// sourceRoot. Parcel reads the targets from the package.json of the directory it runs in.
+type ParcelGraph = Parameters<typeof enrichLocations>[0]
+const parcelGraph = async (dir: string) => {
+  const graph: ParcelGraph = JSON.parse(await readFile(join(dir, 'coldpath.graph.json'), 'utf8'))
+  const name = new Map(graph.modules.map((m) => [m.id, m.source.split('/').at(-1)!]))
+  return {
+    graph,
+    entries: graph.modules.filter((m) => m.entry).map((m) => name.get(m.id)),
+    edges: graph.edges.map((e) => [name.get(e.from), name.get(e.to), e.kind, e.location?.line, e.topLevel].join(' ')),
+  }
+}
+await mkdir(join(project, 'parcel-cases'))
+await writeFile(
+  join(project, 'parcel-cases/main.ts'),
+  `import {label} from '../src/mixed.js'
+const legacy = require('../src/legacy.cjs')
+export function later(): string {
+  return require('../src/search.js').search('x')
+}
+export const worker = () => new Worker(new URL('./worker.js', import.meta.url), {type: 'module'})
+export const port = (info: {port: number}) => label(info.port) + legacy.format(1)
+`,
+)
+await writeFile(join(project, 'parcel-cases/worker.js'), "import {startup} from '../src/startup.js'\npostMessage(startup())\n")
+await writeFile(join(project, 'parcel-cases/index.html'), '<!doctype html><script type="module" src="./main.ts"></script>')
+await save(join(project, 'parcel-cases/package.json'), {
+  private: true,
+  targets: {
+    one: {distDir: join(work, 'parcel-cases/one')},
+    two: {distDir: join(work, 'parcel-cases/two'), sourceMap: {inlineSources: false}},
+  },
+})
+parcel(join(project, 'parcel-cases'), 'index.html')
+for (const target of ['one', 'two']) {
+  const dir = join(work, 'parcel-cases', target)
+  const {graph, entries, edges} = await parcelGraph(dir)
+  // The lockfile makes the repository Parcel's project root.
+  assert.equal(
+    resolve(dir, graph.root!),
+    target === 'one' ? dir : resolve(root),
+    `parcel ${target}: the root its maps resolve sources from`,
+  )
+  assert.deepEqual(entries, ['main.ts'], `parcel ${target}: neither a required module nor a worker is an entry`)
+  for (const edge of [
+    'main.ts mixed.js static 1 ',
+    'main.ts legacy.cjs require 2 true',
+    'main.ts search.js require 4 false',
+    'main.ts worker.js unknown  ',
+    'worker.js startup.js static 1 ',
+  ])
+    assert(edges.includes(edge), `parcel ${target}: no edge ${edge} among ${edges.join(', ')}`)
+}
+// Entry points in different directories give bundles in different directories, whose maps resolve their sources from there.
+await mkdir(join(project, 'parcel-nested/deep'), {recursive: true})
+await writeFile(join(project, 'parcel-nested/deep/one.js'), "import {startup} from '../../src/startup.js'\nconsole.log(startup())\n")
+await writeFile(join(project, 'parcel-nested/two.js'), "import {search} from '../src/search.js'\nconsole.log(search('a'))\n")
+parcel(project, 'parcel-nested/deep/one.js', 'parcel-nested/two.js', '--dist-dir', join(work, 'parcel-nested'))
+const nested = await parcelGraph(join(work, 'parcel-nested'))
+assert.deepEqual(nested.entries.toSorted(), ['one.js', 'two.js'])
+assert.match(nested.graph.warnings.join('\n'), /resolve their sources from 2 directories/)
+
 const nextProject = join(project, 'next')
 await mkdir(join(nextProject, 'pages'), {recursive: true})
 await writeFile(join(nextProject, 'pages/index.jsx'), "export {default} from '../../src/page.jsx';\n")
@@ -474,7 +566,7 @@ try {
         report.recommendations.find(
           (r: {scenario: string; source: string}) => r.scenario === 'open-report' && r.source.endsWith('/' + file),
         )?.kind
-      // Rspack's minifier folds drawChart(1234) and registered(1) into openReport, so neither runs in open-report.
+      // The minifiers of Rspack and Parcel fold drawChart(1234) and registered(1) into openReport, so neither runs in open-report.
       if (['bun', 'vite', 'vue', 'svelte', 'webpack'].includes(artifact.name)) {
         assert.equal(action('chart.js'), 'defer-review', artifact.name + ': functions-only module')
         assert.equal(action('register.js'), 'split-review', artifact.name + ': top-level registration')

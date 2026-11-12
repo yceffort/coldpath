@@ -15,6 +15,7 @@
     "./rollup": "./build/lib/rollup.js",
     "./vite": "./build/lib/rollup.js",
     "./webpack": "./build/lib/webpack.js",
+    "./parcel": "./build/lib/parcel.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -71,6 +72,7 @@
     "next": "16.4.1",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",
+    "parcel": "2.16.4",
     "preact": "11.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
