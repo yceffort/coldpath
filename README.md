@@ -26,7 +26,7 @@ Early-stage software: the CLI and JSON schema may change. Unobserved bytes are c
 npm install --save-dev @yceffort/coldpath
 ```
 
-The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Linux has two for each architecture: one linked against glibc (2.35 or newer), and a static one for musl distributions such as Alpine, `@yceffort/coldpath-linux-<arch>-musl`. Windows is not supported. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` (also for Rspack) graph plugins. Collection and CPU profiling additionally need `playwright` in your project.
+The npm package includes a prebuilt analyzer for macOS (arm64, x64) and Linux (arm64, x64) through an optional `@yceffort/coldpath-<platform>-<arch>` dependency. Linux has two for each architecture: one linked against glibc (2.35 or newer), and a static one for musl distributions such as Alpine, `@yceffort/coldpath-linux-<arch>-musl`. Windows is not supported. It puts the collector, graph export, and analyzer behind one `coldpath` command, and exports `@yceffort/coldpath/rollup`, `@yceffort/coldpath/vite`, and `@yceffort/coldpath/webpack` (also for Rspack) graph plugins and the `@yceffort/coldpath/parcel` reporter. Collection and CPU profiling additionally need `playwright` in your project.
 
 On other platforms, or to use the analyzer without Node.js, build it with Rust 1.88 or newer:
 
