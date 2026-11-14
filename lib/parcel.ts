@@ -109,16 +109,17 @@ async function report({event, options}: ReportArguments) {
     const graph: Graph = {schemaVersion: 1, bundler: 'parcel', modules: [...modules.values()], edges: [...edges.values()], warnings: []}
     // Parcel names the sources of a map from the project root. A production build for the browser writes no sourceRoot,
     // so the analyzer resolves them from the directory of the bundle, and the graph must name that directory as its root.
-    // Whether a map has a sourceRoot is an option of the target, so one map is read for each target in each directory.
-    const roots = new Map<string, string | null>()
+    // Whether a map has a sourceRoot is an option of the target, so one map is read for each target in each directory:
+    // that of the first bundle with one, since an optimizer may leave a bundle without a map.
+    const roots = new Map<string, string>()
     for (const bundle of bundles) {
       const directory = dirname(bundle.filePath)
       const key = bundle.target.name + '\0' + directory
       if (bundle.type !== 'js' || roots.has(key)) continue
       const map = await sourceMap(bundle.filePath, options.outputFS)
-      roots.set(key, map && resolve(directory, typeof map.sourceRoot === 'string' ? map.sourceRoot : '.'))
+      if (map) roots.set(key, resolve(directory, typeof map.sourceRoot === 'string' ? map.sourceRoot : '.'))
     }
-    const [mapped = root, ...others] = new Set([...roots.values()].filter((directory) => directory !== null))
+    const [mapped = root, ...others] = new Set(roots.values())
     if (others.length)
       graph.warnings.push(
         `Parcel's source maps resolve their sources from ${others.length + 1} directories (${[mapped, ...others].map((directory) => slash(relative(distDir, directory)) || '.').join(', ')} in the output directory), and the graph matches only the first. Set the target's sourceMap.inlineSources to false so that Parcel writes a sourceRoot.`,

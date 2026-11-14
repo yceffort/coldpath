@@ -5,7 +5,7 @@ import type {ChildProcess} from 'node:child_process'
 import {createServer} from 'node:http'
 import type {Server} from 'node:http'
 import type {AddressInfo} from 'node:net'
-import {mkdir, readdir, readFile, writeFile, copyFile, rm} from 'node:fs/promises'
+import {mkdir, readdir, readFile, realpath, writeFile, copyFile, rm} from 'node:fs/promises'
 import {resolve, join, dirname, relative} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {createRequire} from 'node:module'
@@ -277,6 +277,28 @@ const inlineDir = join(work, 'parcel-cases/three')
 for (const file of await readdir(inlineDir)) if (file.endsWith('.js')) await save(join(inlineDir, file + '.map'), {sourceRoot: '../'})
 parcel(join(project, 'parcel-cases'), 'index.html', '--target', 'three')
 assert.equal(resolve(inlineDir, (await parcelGraph(inlineDir)).graph.root!), inlineDir, 'parcel three: a stale map file')
+// An optimizer need not return a map, so a target's first bundle can lack one that a later bundle has.
+const unmappedDir = join(work, 'parcel-cases/one')
+await rm(unmappedDir, {recursive: true})
+await writeFile(
+  join(project, 'parcel-cases/drop-map.mjs'),
+  "export default {[Symbol.for('parcel-plugin-config')]: {optimize: ({bundle, contents, map}) => ({contents, map: bundle.getMainEntry()?.filePath.endsWith('worker.js') ? map : undefined})}}\n",
+)
+// pnpm does not hoist Parcel's default config, and a config extends a path only when it is relative.
+await save(join(project, 'parcel-cases/parcelrc.json'), {
+  extends: relative(
+    join(project, 'parcel-cases'),
+    createRequire(await realpath(join(root, 'node_modules/parcel/package.json'))).resolve('@parcel/config-default'),
+  ),
+  optimizers: {'*.js': ['...', './drop-map.mjs']},
+})
+parcel(join(project, 'parcel-cases'), 'index.html', '--target', 'one', '--config', join(project, 'parcel-cases/parcelrc.json'))
+assert.deepEqual(
+  (await readdir(unmappedDir)).filter((file) => file.endsWith('.map')).map((file) => file.split('.')[0]),
+  ['worker'],
+  'parcel one: only the worker bundle keeps its map',
+)
+assert.equal(resolve(unmappedDir, (await parcelGraph(unmappedDir)).graph.root!), unmappedDir, 'parcel one: a first bundle without a map')
 // Entry points in different directories give bundles in different directories, whose maps resolve their sources from there.
 await mkdir(join(project, 'parcel-nested/deep'), {recursive: true})
 await writeFile(join(project, 'parcel-nested/deep/one.js'), "import {startup} from '../../src/startup.js'\nconsole.log(startup())\n")
